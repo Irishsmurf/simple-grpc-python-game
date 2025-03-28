@@ -40,7 +40,7 @@ def listen_for_updates(stub, send_input_func):
     Listens for GameState updates from the server stream in a separate thread.
     Also handles sending PlayerInput messages periodically or on change.
     """
-    global latest_input
+    global latest_game_state
     print("Connecting to stream...")
     try:
         # --- Start the bidirectional stream ---
@@ -78,6 +78,9 @@ def listen_for_updates(stub, send_input_func):
             print("\n--- Game State Update ---")
             with state_lock:
                 latest_game_state = state
+            player_ids = [p.id for p in state.players] if state and state.players else []
+            print(f"DEBUG Listener: Received state update with player IDs: {player_ids}")
+
 
     except grpc.RpcError as e:
         print(f"Error receiving game state: {e.code()} - {e.details()} - {e.debug_error_string()}")
@@ -196,14 +199,25 @@ def run():
             
             screen.fill(BACKGROUND_COLOR)
 
+            # Draw the player sprite at the current position
             current_state_snapshot = None
             with state_lock:
-                if latest_game_state:
+                snapshot_read_debug = latest_game_state
+                print(f"DEBUG Draw (Inside Lock): Reading latest_game_state. Value: {'Not None' if snapshot_read_debug is not None else 'None'}")
+                if latest_game_state is not None:
                     current_state_snapshot = latest_game_state
             if current_state_snapshot:
+                print("DEBUG Draw: Snapshot found, attempting to draw players...")
+                if not current_state_snapshot.players:
+                    print("DEBUG Draw: State exists, but no players to draw.")
                 for player in current_state_snapshot.players:
-                    player_rect.center = (int(player.x_pos), int(player.y_pos))
+                    pos_x = int(player.x_pos)
+                    pos_y = int(player.y_pos)
+                    player_rect.center = (pos_x, pos_y)
+                    print(f"DEBUG Draw: Trying to blit player {player.id} at ({pos_x}, {pos_y})")
                     screen.blit(player_img, player_rect)
+            else:
+                print("DEBUG Draw: No game state snapshot received yet.")
             
             pygame.display.flip()
             clock.tick(FPS)

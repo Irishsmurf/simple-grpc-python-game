@@ -158,6 +158,8 @@ func (s *gameServer) gameTick() {
 	if stateChangedSinceLastTick {
 		log.Println("Game state changed during tick. Broadcasting updated state.")
 		s.broadcastState()
+	} else {
+		s.broadcastState()
 	}
 }
 

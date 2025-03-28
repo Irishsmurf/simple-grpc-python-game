@@ -48,6 +48,7 @@ def listen_for_updates(stub, send_input_func):
         # Let's send an initial UNKNOWN input to kick things off
         def input_generator():
             global latest_input
+            global current_direction
             last_sent_direction = None
             while True:
                 # Simple logic: Send input if it changed, or periodically?
@@ -55,17 +56,7 @@ def listen_for_updates(stub, send_input_func):
                 dir_to_send = game_pb2.PlayerInput.Direction.UNKNOWN
                 with direction_lock:
                     dir_to_send = current_direction
-                    # Reset latest input after reading to avoid re-sending immediately?
-                    # Or just send current state? Let's just send current state.
-
-                if dir_to_send != last_sent_direction:
-                     print(f"DEBUG: Sending input {game_pb2.PlayerInput.Direction.Name(dir_to_send)}")
-                     yield game_pb2.PlayerInput(direction=dir_to_send)
-                     last_sent_direction = dir_to_send
-                else:
-                    # Send infrequent keep-alive or allow server to timeout?
-                    # Let's just yield nothing if no change for now, might need keep-alive later.
-                     pass # yield game_pb2.PlayerInput(direction=game_pb2.PlayerInput.Direction.UNKNOWN) ?
+                yield game_pb2.PlayerInput(direction=dir_to_send)
 
                 time.sleep(0.1 / 30.0) # Adjust sleep time as needed (controls input send rate)
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	// Needed for basic state management later
 	"simple-grpc-game/server/internal/game"
@@ -24,6 +25,11 @@ type gameServer struct {
 	muStreams     sync.Mutex                                 // Mutex to protect the activeStreams map
 	activeStreams map[string]pb.GameService_GameStreamServer // Map playerID to their stream
 }
+
+const (
+	movementTimeout = 200 * time.Millisecond // Time between game ticks
+	tickRate        = 100 * time.Millisecond
+)
 
 // NewGameServer creates an instance of our game server
 func NewGameServer() *gameServer {
@@ -127,6 +133,34 @@ func (s *gameServer) broadcastState() {
 	}
 }
 
+func (s *gameServer) gameTick() {
+	playerIds := s.state.GetAllPlayerIDs()
+	stateChangedSinceLastTick := false
+	for _, playerID := range playerIds {
+		trackedPlayer, exists := s.state.GetTrackedPlayer(playerID)
+		if !exists {
+			log.Printf("Player %s not found in state during game tick.", playerID)
+			continue
+		}
+		// Check if the player has moved since the last tick
+
+		isMoving := trackedPlayer.LastDirection != pb.PlayerInput_UNKNOWN
+		timeout := time.Since(trackedPlayer.LastInputTime) > movementTimeout
+		if isMoving && timeout {
+			updated := s.state.UpdatePlayerDirection(playerID, pb.PlayerInput_UNKNOWN)
+			if updated {
+				log.Printf("Player %s input timed out. Direction reset to UNKNOWN.", trackedPlayer.PlayerData.Id)
+				stateChangedSinceLastTick = true
+			}
+		}
+	}
+
+	if stateChangedSinceLastTick {
+		log.Println("Game state changed during tick. Broadcasting updated state.")
+		s.broadcastState()
+	}
+}
+
 func main() {
 	port := ":50051" // Port for the gRPC server to listen on
 	lis, err := net.Listen("tcp", port)
@@ -143,8 +177,18 @@ func main() {
 	// Register the game server implementation with the gRPC server
 	pb.RegisterGameServiceServer(grpcServer, gServer)
 
-	log.Printf("Starting gRPC server on %s", port)
+	// --- Start the Game Tick Loop ---
+	log.Printf("Starting game tick loop (Rate: %v)", tickRate)
+	ticker := time.NewTicker(tickRate)
+	defer ticker.Stop() // Ensure ticker is stopped if main exits
 
+	go func() { // Run the ticker checking in a separate goroutine
+		for range ticker.C { // This loop executes every tick
+			gServer.gameTick() // Call the game logic function
+		}
+	}()
+
+	log.Printf("Starting gRPC server on %s", port)
 	// Start listening for incoming connections
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Failed to serve gRPC server: %v", err)

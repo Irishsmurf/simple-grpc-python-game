@@ -203,21 +203,14 @@ def run():
             current_state_snapshot = None
             with state_lock:
                 snapshot_read_debug = latest_game_state
-                print(f"DEBUG Draw (Inside Lock): Reading latest_game_state. Value: {'Not None' if snapshot_read_debug is not None else 'None'}")
                 if latest_game_state is not None:
                     current_state_snapshot = latest_game_state
             if current_state_snapshot:
-                print("DEBUG Draw: Snapshot found, attempting to draw players...")
-                if not current_state_snapshot.players:
-                    print("DEBUG Draw: State exists, but no players to draw.")
                 for player in current_state_snapshot.players:
                     pos_x = int(player.x_pos)
                     pos_y = int(player.y_pos)
                     player_rect.center = (pos_x, pos_y)
-                    print(f"DEBUG Draw: Trying to blit player {player.id} at ({pos_x}, {pos_y})")
                     screen.blit(player_img, player_rect)
-            else:
-                print("DEBUG Draw: No game state snapshot received yet.")
             
             pygame.display.flip()
             clock.tick(FPS)

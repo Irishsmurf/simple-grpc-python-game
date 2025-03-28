@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package game;
+
+// Option for Go package path - adjust if your Go module path is different
+option go_package = "simple-grpc-game/gen/go/game"; // Tells protoc where to output Go code relative to module root
+
+// Represents a player in the game
+message Player {
+  string id = 1; // Unique player identifier
+  float x_pos = 2;
+  float y_pos = 3;
+  // Could add sprite type, color, etc. later
+}
+
+// Represents the entire game state to be sent to clients
+message GameState {
+  repeated Player players = 1; // List of all players currently in the game
+}
+
+// Input from a client (e.g., movement direction)
+message PlayerInput {
+  enum Direction {
+    UNKNOWN = 0;
+    UP = 1;
+    DOWN = 2;
+    LEFT = 3;
+    RIGHT = 4;
+  }
+  Direction direction = 1;
+  // Could add delta time or magnitude later
+}
+
+// Empty message often useful for simple notifications or stream triggers
+message Empty {}
+
+
+// The gRPC service definition - Using Bidirectional Stream
+service GameService {
+  // A bidirectional stream for real-time game updates and input
+  // Client sends PlayerInput, Server streams GameState.
+  // First message from Client *could* be special (e.g., name request)
+  // First message from Server *could* be special (e.g., assigned ID, initial state)
+  rpc GameStream (stream PlayerInput) returns (stream GameState);
+}

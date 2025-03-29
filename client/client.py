@@ -59,9 +59,12 @@ next_color_index = 0
 
 latest_game_state = None
 state_lock = threading.Lock()
+connection_error_message = None
 
 current_direction = game_pb2.PlayerInput.Direction.UNKNOWN
 direction_lock = threading.Lock()
+stop_event = threading.Event()
+
 
 camera_x, camera_y = 0, 0
 
@@ -134,14 +137,26 @@ def listen_for_updates(stub):
                         if p.id not in player_colors:
                             player_colors[p.id] = AVAILABLE_COLORS[next_color_index % len(AVAILABLE_COLORS)]
                             next_color_index += 1
-
-
     except grpc.RpcError as e:
-        print(f"Error receiving game state: {e.code()} - {e.details()} - {e.debug_error_string()}")
+        global connection_error_message
+        if not stop_event.is_set():
+            error_msg = f"Connection Error: {e.code()} - {e.details()}. Try restarting Client/Server."
+            print(f"Error receiving game state: {e.code()} - {e.details()} - {e.debug_error_string()}")
+            with state_lock:
+                connection_error_message = error_msg
+            stop_event.set()
+        else:
+            print("Listener: Shutting down due to main thread request (gRPC Cancel)")
     except Exception as e:
-        print(f"An unexpected error occurred in listener thread: {e}")
+        if stop_event.is_set():
+            import traceback
+            traceback.print_exc()
+            stop_event.set()
+        else:
+            print("Listener: Shutting down due to main thread request.")
     finally:
         print("Listener thread finished.")
+        stop_event.set()
 
 def handle_input():
     """Handles keyboard input to set the direction using readchar."""
@@ -200,6 +215,10 @@ def run():
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     clock = pygame.time.Clock()
 
+    pygame.font.init()
+    error_font = pygame.font.SysFont(None, 26)
+    error_text_color = (255, 100, 100)
+    
     player_sprites = {}
     directional_frames = {}
     fallback_player_img = None
@@ -263,114 +282,147 @@ def run():
         # Main loop
         running = True
         my_player_snapshot = None
-        while running:
-            while my_player_id is None:
-                if listener_thread and not listener_thread.is_alive():
-                    print("Error: Listener thread terminated before Player ID")
-                    running = False
-                    break
-                print("Waiting for player id...")
-                time.sleep(0.1)
-                if not running:
-                    continue
+        quit_requested = False
 
-            new_direction = game_pb2.PlayerInput.Direction.UNKNOWN
-            keys_pressed = pygame.key.get_pressed()
+        while running:
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    running = False
+                    quit_requested = True
+                    break
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        quit_requested = True
+                        break
 
-            if keys_pressed[pygame.K_w] or keys_pressed[pygame.K_UP]:
-                new_direction = game_pb2.PlayerInput.Direction.UP
-            elif keys_pressed[pygame.K_s] or keys_pressed[pygame.K_DOWN]:
-                new_direction = game_pb2.PlayerInput.Direction.DOWN
-            elif keys_pressed[pygame.K_a] or keys_pressed[pygame.K_LEFT]:
-                new_direction = game_pb2.PlayerInput.Direction.LEFT
-            elif keys_pressed[pygame.K_d] or keys_pressed[pygame.K_RIGHT]:
-                new_direction = game_pb2.PlayerInput.Direction.RIGHT
-
-            with direction_lock:
-                if current_direction != new_direction:
-                    current_direction = new_direction
-                    print(f"Direction changed to {game_pb2.PlayerInput.Direction.Name(current_direction)}")
+            if quit_requested:
+                running = False
+                stop_event.set()
+                continue
             
-
-            current_state_snapshot = None
-            assigned_colors = {}
-            local_id = my_player_id
-            my_player_snapshot = None
-
+            current_error = None
             with state_lock:
-                if latest_game_state is not None:
-                    current_state_snapshot = latest_game_state
-                    for p in current_state_snapshot.players:
-                        if p.id == local_id:
-                            my_player_snapshot = p
-                            break
-            with color_lock:
-                assigned_colors = player_colors.copy()
-
-            if my_player_snapshot:
-                target_cam_x = my_player_snapshot.x_pos - SCREEN_WIDTH / 2
-                target_cam_y = my_player_snapshot.y_pos - SCREEN_HEIGHT / 2
+                current_error = connection_error_message
+            
+            if current_error:
+                screen.fill(BACKGROUND_COLOR)
+                error_surface = error_font.render(current_error, True, error_text_color)
+                error_rect = error_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+                screen.blit(error_surface, error_rect)
+            else:                
+                if stop_event.is_set():
+                    print("Stop event detected from another thread")
+                    running = False
+                    continue
                 
-                if world_pixel_width > SCREEN_WIDTH:
-                    camera_x = max(0.0, min(target_cam_x, world_pixel_width - SCREEN_WIDTH))
-                else:
-                    camera_x = (world_pixel_width - SCREEN_WIDTH) / 2
+                while my_player_id is None:
+                    if listener_thread and not listener_thread.is_alive():
+                        print("Error: Listener thread terminated before Player ID")
+                        running = False
+                        break
+                    print("Waiting for player id...")
+                    time.sleep(0.1)
+                    if not running:
+                        continue
 
-                if world_pixel_height > SCREEN_HEIGHT:
-                    camera_y = max(0.0, min(target_cam_y, world_pixel_height - SCREEN_HEIGHT))
-                else:
-                    camera_y = (world_pixel_height - SCREEN_HEIGHT) / 2
+                new_direction = game_pb2.PlayerInput.Direction.UNKNOWN
+                keys_pressed = pygame.key.get_pressed()
 
-            screen.fill(BACKGROUND_COLOR)
-            # Draw the map
-            local_map_data = None
-            map_w, map_h = 0, 0
-            current_tile_size = 32
-            with map_lock:
-                local_map_data = world_map_data
-                map_w = map_width_tiles
-                map_h = map_height_tiles
-                if tile_size > 0:
-                    current_tile_size = tile_size
-            if local_map_data:
-                start_tile_x = max(0, int(camera_x / current_tile_size))
-                end_tile_x = min(map_w, int((camera_x + SCREEN_WIDTH) / current_tile_size))
-                start_tile_y = max(0, int(camera_y / current_tile_size))
-                end_tile_y = min(map_h, int((camera_y + SCREEN_HEIGHT) / current_tile_size))
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        running = False
 
-                for y in range(start_tile_y, end_tile_y):
-                    for x in range(start_tile_x, end_tile_x):
-                        tile_id = local_map_data[y][x]
-                        if tile_id in tile_graphics:
-                            tile_surface = tile_graphics[tile_id]
-                            screen_x = x * current_tile_size - camera_x
-                            screen_y = y * current_tile_size - camera_y
-                            screen.blit(tile_surface, (screen_x, screen_y))
+                if keys_pressed[pygame.K_w] or keys_pressed[pygame.K_UP]:
+                    new_direction = game_pb2.PlayerInput.Direction.UP
+                elif keys_pressed[pygame.K_s] or keys_pressed[pygame.K_DOWN]:
+                    new_direction = game_pb2.PlayerInput.Direction.DOWN
+                elif keys_pressed[pygame.K_a] or keys_pressed[pygame.K_LEFT]:
+                    new_direction = game_pb2.PlayerInput.Direction.LEFT
+                elif keys_pressed[pygame.K_d] or keys_pressed[pygame.K_RIGHT]:
+                    new_direction = game_pb2.PlayerInput.Direction.RIGHT
 
-            if current_state_snapshot:
-                for player in current_state_snapshot.players:
-                    player_state = player.current_animation_state
-                    current_frame_surface = directional_frames.get(player_state, directional_frames[game_pb2.AnimationState.UNKNOWN_STATE])
+                with direction_lock:
+                    if current_direction != new_direction:
+                        current_direction = new_direction
+                        print(f"Direction changed to {game_pb2.PlayerInput.Direction.Name(current_direction)}")
+                
+
+                current_state_snapshot = None
+                assigned_colors = {}
+                local_id = my_player_id
+                my_player_snapshot = None
+
+                with state_lock:
+                    if latest_game_state is not None:
+                        current_state_snapshot = latest_game_state
+                        for p in current_state_snapshot.players:
+                            if p.id == local_id:
+                                my_player_snapshot = p
+                                break
+                with color_lock:
+                    assigned_colors = player_colors.copy()
+
+                if my_player_snapshot:
+                    target_cam_x = my_player_snapshot.x_pos - SCREEN_WIDTH / 2
+                    target_cam_y = my_player_snapshot.y_pos - SCREEN_HEIGHT / 2
                     
-                    if current_frame_surface:
-                        screen_x = player.x_pos - camera_x
-                        screen_y = player.y_pos - camera_y
-                        player_rect = current_frame_surface.get_rect()
-                        player_rect.center = (int(screen_x), int(screen_y))
+                    if world_pixel_width > SCREEN_WIDTH:
+                        camera_x = max(0.0, min(target_cam_x, world_pixel_width - SCREEN_WIDTH))
+                    else:
+                        camera_x = (world_pixel_width - SCREEN_WIDTH) / 2
 
-                        temp_sprite_frame = current_frame_surface.copy()
-                        color = assigned_colors.get(player.id, (255, 255, 255))
-                        tint_surface = pygame.Surface(player_rect.size, pygame.SRCALPHA)
-                        tint_surface.fill(color + (255,))  # Semi-transparent tint
-                        temp_sprite_frame.blit(tint_surface, (0,0), special_flags=pygame.BLEND_RGBA_MULT)
+                    if world_pixel_height > SCREEN_HEIGHT:
+                        camera_y = max(0.0, min(target_cam_y, world_pixel_height - SCREEN_HEIGHT))
+                    else:
+                        camera_y = (world_pixel_height - SCREEN_HEIGHT) / 2
 
-                        if player.id == local_id:
-                            pygame.draw.rect(screen, (255, 255, 255), player_rect.inflate(4, 4), 2)
-                        screen.blit(temp_sprite_frame, player_rect)
+                screen.fill(BACKGROUND_COLOR)
+                # Draw the map
+                local_map_data = None
+                map_w, map_h = 0, 0
+                current_tile_size = 32
+                with map_lock:
+                    local_map_data = world_map_data
+                    map_w = map_width_tiles
+                    map_h = map_height_tiles
+                    if tile_size > 0:
+                        current_tile_size = tile_size
+                if local_map_data:
+                    buffer = 1
+                    start_tile_x = max(0, int(camera_x / current_tile_size) - buffer)
+                    end_tile_x = min(map_w, int((camera_x + SCREEN_WIDTH) / current_tile_size) + buffer)
+                    start_tile_y = max(0, int(camera_y / current_tile_size) - buffer)
+                    end_tile_y = min(map_h, int((camera_y + SCREEN_HEIGHT) / current_tile_size) + buffer)
+
+                    for y in range(start_tile_y, end_tile_y):
+                        for x in range(start_tile_x, end_tile_x):
+                            tile_id = local_map_data[y][x]
+                            if tile_id in tile_graphics:
+                                tile_surface = tile_graphics[tile_id]
+                                screen_x = x * current_tile_size - camera_x
+                                screen_y = y * current_tile_size - camera_y
+                                screen.blit(tile_surface, (screen_x, screen_y))
+
+                if current_state_snapshot:
+                    for player in current_state_snapshot.players:
+                        player_state = player.current_animation_state
+                        current_frame_surface = directional_frames.get(player_state, directional_frames[game_pb2.AnimationState.UNKNOWN_STATE])
+                        
+                        if current_frame_surface:
+                            screen_x = player.x_pos - camera_x
+                            screen_y = player.y_pos - camera_y
+                            player_rect = current_frame_surface.get_rect()
+                            player_rect.center = (int(screen_x), int(screen_y))
+
+                            temp_sprite_frame = current_frame_surface.copy()
+                            color = assigned_colors.get(player.id, (255, 255, 255))
+                            tint_surface = pygame.Surface(player_rect.size, pygame.SRCALPHA)
+                            tint_surface.fill(color + (255,))  # Semi-transparent tint
+                            temp_sprite_frame.blit(tint_surface, (0,0), special_flags=pygame.BLEND_RGBA_MULT)
+
+                            if player.id == local_id:
+                                pygame.draw.rect(screen, (255, 255, 255), player_rect.inflate(4, 4), 2)
+                            screen.blit(temp_sprite_frame, player_rect)
             
             pygame.display.flip()
             clock.tick(FPS)
@@ -380,13 +432,16 @@ def run():
     except Exception as e:
         print(f"An error occurred in the main loop or connection: {e}")
     finally:
+        print("Init. Shutdown...")
+        stop_event.set()
+
         if channel:
+            print("Closing gRPC channel...")
             channel.close()
         pygame.quit()
         if listener_thread and listener_thread.is_alive():
             print("Waiting for listener thread to finish...")
             listener_thread.join(timeout=0.5)
-        pygame.quit()
         print("Client shut down.")
 
 if __name__ == "__main__":

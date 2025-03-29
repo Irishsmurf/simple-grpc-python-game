@@ -65,12 +65,12 @@ direction_lock = threading.Lock()
 
 camera_x, camera_y = 0, 0
 
-def listen_for_updates(stub, send_input_func):
+def listen_for_updates(stub):
     """
     Listens for GameState updates from the server stream in a separate thread.
     Also handles sending PlayerInput messages periodically or on change.
     """
-    global latest_game_state, next_color_index
+    global latest_game_state, next_color_index, my_player_id
     global world_map_data, map_width_tiles, map_height_tiles
     global world_pixel_width, world_pixel_height, tile_size
 
@@ -101,6 +101,9 @@ def listen_for_updates(stub, send_input_func):
             if first_message and first_message.HasField("initial_map_data"):
                 map_proto = first_message.initial_map_data
                 print(f"Received map data: {map_proto.tile_width}x{map_proto.tile_height} tiles")
+                my_player_id = map_proto.assigned_player_id
+                print(f"*** Received own player ID: {my_player_id} ***")
+                
                 temp_map = []
                 for y in range(map_proto.tile_height):
                     row_proto = map_proto.rows[y]
@@ -120,30 +123,6 @@ def listen_for_updates(stub, send_input_func):
             print("Error: Stream closed before map data received.")
             return 
         
-        try:
-            second_message = next(stream)
-            if second_message and second_message.HasField('game_state'):
-                 initial_game_state = second_message.game_state
-                 if initial_game_state and initial_game_state.players:
-                    my_player_id = initial_game_state.players[0].id
-                    print(f"*** Received own player ID: {my_player_id} ***")
-                    # Assign colors based on this first game state
-                    with color_lock:
-                         for p in initial_game_state.players:
-                            if p.id not in player_colors:
-                                 player_colors[p.id] = AVAILABLE_COLORS[next_color_index % len(AVAILABLE_COLORS)]
-                                 next_color_index += 1
-                    # Update shared state
-                    with state_lock:
-                         latest_game_state = initial_game_state
-                 else:
-                     print("Warning: Second message GameState had no players.")
-            else:
-                 print("Warning: Second message was not GameState!")
-        except StopIteration:
-                print("Error: Stream closed after initial map, before game state.")
-                return
-
         # --- Receive Loop ---
         for message in stream:
             if message and message.HasField('game_state'):
@@ -275,14 +254,26 @@ def run():
             print(f"Error: Connection timed out after 5 seconds. Is the server running at {SERVER_ADDRESS}?")
             raise
         stub = game_pb2_grpc.GameServiceStub(channel)
-        listener_thread = threading.Thread(target=listen_for_updates, args=(stub, None), daemon=True)
+        listener_thread = threading.Thread(target=listen_for_updates, args=(stub,), daemon=True)
         listener_thread.start()
         print("Listener thread started.")
+        time.sleep(0.5)
+        print(f"DEBUG: run() starting main look. my_player_id = {my_player_id}")
 
         # Main loop
         running = True
         my_player_snapshot = None
         while running:
+            while my_player_id is None:
+                if listener_thread and not listener_thread.is_alive():
+                    print("Error: Listener thread terminated before Player ID")
+                    running = False
+                    break
+                print("Waiting for player id...")
+                time.sleep(0.1)
+                if not running:
+                    continue
+
             new_direction = game_pb2.PlayerInput.Direction.UNKNOWN
             keys_pressed = pygame.key.get_pressed()
 
@@ -356,7 +347,9 @@ def run():
                         tile_id = local_map_data[y][x]
                         if tile_id in tile_graphics:
                             tile_surface = tile_graphics[tile_id]
-                            screen.blit(tile_surface, (x * current_tile_size - camera_x, y * current_tile_size - camera_y))
+                            screen_x = x * current_tile_size - camera_x
+                            screen_y = y * current_tile_size - camera_y
+                            screen.blit(tile_surface, (screen_x, screen_y))
 
             if current_state_snapshot:
                 for player in current_state_snapshot.players:

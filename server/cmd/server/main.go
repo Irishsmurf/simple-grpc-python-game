@@ -73,6 +73,7 @@ func (s *gameServer) GameStream(stream pb.GameService_GameStreamServer) error {
 		WorldPixelHeight: worldPixelH,
 		WorldPixelWidth:  worldPixelW,
 		TileSizePixels:   tileSize,
+		AssignedPlayerId: playerID,
 	}
 
 	for y, rowData := range mapGrid {

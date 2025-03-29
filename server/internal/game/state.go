@@ -320,7 +320,7 @@ func (s *State) ApplyInput(playerID string, direction pb.PlayerInput_Direction) 
 
 	if direction != pb.PlayerInput_UNKNOWN {
 		isMoving = true
-		moveSpeed := float32(1.0) // Example speed - could be configurable
+		moveSpeed := float32(2) // Example speed - could be configurable
 		switch direction {
 		case pb.PlayerInput_UP:
 			potentialY -= moveSpeed
@@ -346,7 +346,6 @@ func (s *State) ApplyInput(playerID string, direction pb.PlayerInput_Direction) 
 
 		collidesWithMap := s.CheckMapCollision(potentialX, potentialY)
 		if collidesWithMap {
-			log.Printf("Collision detected with map for player %s at (%f, %f)", playerID, potentialX, potentialY)
 			moveAttemptBlocked = true
 		}
 

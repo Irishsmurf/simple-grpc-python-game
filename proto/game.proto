@@ -55,6 +55,8 @@ message InitialMapData {
     float world_pixel_height = 4;
     float world_pixel_width = 5;
     int32 tile_size_pixels = 6;
+
+    string assigned_player_id = 7;
 }
 
 message ServerMessage {

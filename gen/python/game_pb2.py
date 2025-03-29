@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\ngame.proto\x12\x04game\"i\n\x06Player\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05x_pos\x18\x02 \x01(\x02\x12\r\n\x05y_pos\x18\x03 \x01(\x02\x12\x35\n\x17\x63urrent_animation_state\x18\x04 \x01(\x0e\x32\x14.game.AnimationState\"*\n\tGameState\x12\x1d\n\x07players\x18\x01 \x03(\x0b\x32\x0c.game.Player\"~\n\x0bPlayerInput\x12.\n\tdirection\x18\x01 \x01(\x0e\x32\x1b.game.PlayerInput.Direction\"?\n\tDirection\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x06\n\x02UP\x10\x01\x12\x08\n\x04\x44OWN\x10\x02\x12\x08\n\x04LEFT\x10\x03\x12\t\n\x05RIGHT\x10\x04\"\x07\n\x05\x45mpty\"\x17\n\x06MapRow\x12\r\n\x05tiles\x18\x01 \x03(\x05\"\xa6\x01\n\x0eInitialMapData\x12\x1a\n\x04rows\x18\x01 \x03(\x0b\x32\x0c.game.MapRow\x12\x12\n\ntile_width\x18\x02 \x01(\x05\x12\x13\n\x0btile_height\x18\x03 \x01(\x05\x12\x1a\n\x12world_pixel_height\x18\x04 \x01(\x02\x12\x19\n\x11world_pixel_width\x18\x05 \x01(\x02\x12\x18\n\x10tile_size_pixels\x18\x06 \x01(\x05\"s\n\rServerMessage\x12\x30\n\x10initial_map_data\x18\x01 \x01(\x0b\x32\x14.game.InitialMapDataH\x00\x12%\n\ngame_state\x18\x02 \x01(\x0b\x32\x0f.game.GameStateH\x00\x42\t\n\x07message*t\n\x0e\x41nimationState\x12\x11\n\rUNKNOWN_STATE\x10\x00\x12\x08\n\x04IDLE\x10\x01\x12\x0e\n\nRUNNING_UP\x10\x02\x12\x10\n\x0cRUNNING_DOWN\x10\x03\x12\x10\n\x0cRUNNING_LEFT\x10\x04\x12\x11\n\rRUNNING_RIGHT\x10\x05\x32G\n\x0bGameService\x12\x38\n\nGameStream\x12\x11.game.PlayerInput\x1a\x13.game.ServerMessage(\x01\x30\x01\x42\x1eZ\x1csimple-grpc-game/gen/go/gameb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\ngame.proto\x12\x04game\"i\n\x06Player\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05x_pos\x18\x02 \x01(\x02\x12\r\n\x05y_pos\x18\x03 \x01(\x02\x12\x35\n\x17\x63urrent_animation_state\x18\x04 \x01(\x0e\x32\x14.game.AnimationState\"*\n\tGameState\x12\x1d\n\x07players\x18\x01 \x03(\x0b\x32\x0c.game.Player\"~\n\x0bPlayerInput\x12.\n\tdirection\x18\x01 \x01(\x0e\x32\x1b.game.PlayerInput.Direction\"?\n\tDirection\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x06\n\x02UP\x10\x01\x12\x08\n\x04\x44OWN\x10\x02\x12\x08\n\x04LEFT\x10\x03\x12\t\n\x05RIGHT\x10\x04\"\x07\n\x05\x45mpty\"\x17\n\x06MapRow\x12\r\n\x05tiles\x18\x01 \x03(\x05\"\xc2\x01\n\x0eInitialMapData\x12\x1a\n\x04rows\x18\x01 \x03(\x0b\x32\x0c.game.MapRow\x12\x12\n\ntile_width\x18\x02 \x01(\x05\x12\x13\n\x0btile_height\x18\x03 \x01(\x05\x12\x1a\n\x12world_pixel_height\x18\x04 \x01(\x02\x12\x19\n\x11world_pixel_width\x18\x05 \x01(\x02\x12\x18\n\x10tile_size_pixels\x18\x06 \x01(\x05\x12\x1a\n\x12\x61ssigned_player_id\x18\x07 \x01(\t\"s\n\rServerMessage\x12\x30\n\x10initial_map_data\x18\x01 \x01(\x0b\x32\x14.game.InitialMapDataH\x00\x12%\n\ngame_state\x18\x02 \x01(\x0b\x32\x0f.game.GameStateH\x00\x42\t\n\x07message*t\n\x0e\x41nimationState\x12\x11\n\rUNKNOWN_STATE\x10\x00\x12\x08\n\x04IDLE\x10\x01\x12\x0e\n\nRUNNING_UP\x10\x02\x12\x10\n\x0cRUNNING_DOWN\x10\x03\x12\x10\n\x0cRUNNING_LEFT\x10\x04\x12\x11\n\rRUNNING_RIGHT\x10\x05\x32G\n\x0bGameService\x12\x38\n\nGameStream\x12\x11.game.PlayerInput\x1a\x13.game.ServerMessage(\x01\x30\x01\x42\x1eZ\x1csimple-grpc-game/gen/go/gameb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,8 +32,8 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'game_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'Z\034simple-grpc-game/gen/go/game'
-  _globals['_ANIMATIONSTATE']._serialized_start=619
-  _globals['_ANIMATIONSTATE']._serialized_end=735
+  _globals['_ANIMATIONSTATE']._serialized_start=647
+  _globals['_ANIMATIONSTATE']._serialized_end=763
   _globals['_PLAYER']._serialized_start=20
   _globals['_PLAYER']._serialized_end=125
   _globals['_GAMESTATE']._serialized_start=127
@@ -47,9 +47,9 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_MAPROW']._serialized_start=308
   _globals['_MAPROW']._serialized_end=331
   _globals['_INITIALMAPDATA']._serialized_start=334
-  _globals['_INITIALMAPDATA']._serialized_end=500
-  _globals['_SERVERMESSAGE']._serialized_start=502
-  _globals['_SERVERMESSAGE']._serialized_end=617
-  _globals['_GAMESERVICE']._serialized_start=737
-  _globals['_GAMESERVICE']._serialized_end=808
+  _globals['_INITIALMAPDATA']._serialized_end=528
+  _globals['_SERVERMESSAGE']._serialized_start=530
+  _globals['_SERVERMESSAGE']._serialized_end=645
+  _globals['_GAMESERVICE']._serialized_start=765
+  _globals['_GAMESERVICE']._serialized_end=836
 # @@protoc_insertion_point(module_scope)

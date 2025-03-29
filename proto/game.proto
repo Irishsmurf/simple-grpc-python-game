@@ -5,12 +5,21 @@ package game;
 // Option for Go package path - adjust if your Go module path is different
 option go_package = "simple-grpc-game/gen/go/game"; // Tells protoc where to output Go code relative to module root
 
+enum AnimationState {
+    UNKNOWN_STATE = 0;
+    IDLE = 1;
+    RUNNING_UP = 2;
+    RUNNING_DOWN = 3;
+    RUNNING_LEFT = 4;
+    RUNNING_RIGHT = 5; 
+}
+
 // Represents a player in the game
 message Player {
   string id = 1; // Unique player identifier
   float x_pos = 2;
   float y_pos = 3;
-  // Could add sprite type, color, etc. later
+  AnimationState current_animation_state = 4;
 }
 
 // Represents the entire game state to be sent to clients

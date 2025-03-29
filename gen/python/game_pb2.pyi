@@ -6,15 +6,32 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class AnimationState(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    UNKNOWN_STATE: _ClassVar[AnimationState]
+    IDLE: _ClassVar[AnimationState]
+    RUNNING_UP: _ClassVar[AnimationState]
+    RUNNING_DOWN: _ClassVar[AnimationState]
+    RUNNING_LEFT: _ClassVar[AnimationState]
+    RUNNING_RIGHT: _ClassVar[AnimationState]
+UNKNOWN_STATE: AnimationState
+IDLE: AnimationState
+RUNNING_UP: AnimationState
+RUNNING_DOWN: AnimationState
+RUNNING_LEFT: AnimationState
+RUNNING_RIGHT: AnimationState
+
 class Player(_message.Message):
-    __slots__ = ("id", "x_pos", "y_pos")
+    __slots__ = ("id", "x_pos", "y_pos", "current_animation_state")
     ID_FIELD_NUMBER: _ClassVar[int]
     X_POS_FIELD_NUMBER: _ClassVar[int]
     Y_POS_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_ANIMATION_STATE_FIELD_NUMBER: _ClassVar[int]
     id: str
     x_pos: float
     y_pos: float
-    def __init__(self, id: _Optional[str] = ..., x_pos: _Optional[float] = ..., y_pos: _Optional[float] = ...) -> None: ...
+    current_animation_state: AnimationState
+    def __init__(self, id: _Optional[str] = ..., x_pos: _Optional[float] = ..., y_pos: _Optional[float] = ..., current_animation_state: _Optional[_Union[AnimationState, str]] = ...) -> None: ...
 
 class GameState(_message.Message):
     __slots__ = ("players",)

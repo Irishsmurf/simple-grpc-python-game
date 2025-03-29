@@ -23,7 +23,7 @@ var (
 )
 
 const (
-	PlayerHalfWidth  float32 = 32.0
+	PlayerHalfWidth  float32 = 64.0
 	PlayerHalfHeight float32 = 64.0
 
 	TileSize      int = 32
@@ -320,7 +320,7 @@ func (s *State) ApplyInput(playerID string, direction pb.PlayerInput_Direction) 
 
 	if direction != pb.PlayerInput_UNKNOWN {
 		isMoving = true
-		moveSpeed := float32(5.0) // Example speed - could be configurable
+		moveSpeed := float32(1.0) // Example speed - could be configurable
 		switch direction {
 		case pb.PlayerInput_UP:
 			potentialY -= moveSpeed
@@ -402,11 +402,28 @@ func (s *State) GetAllPlayers() []*pb.Player {
 
 	playerList := make([]*pb.Player, 0, len(s.players))
 	for _, p := range s.players {
+
+		currentAnimationState := pb.AnimationState_IDLE
+
+		switch p.LastDirection {
+		case pb.PlayerInput_UP:
+			currentAnimationState = pb.AnimationState_RUNNING_UP
+		case pb.PlayerInput_DOWN:
+			currentAnimationState = pb.AnimationState_RUNNING_DOWN
+		case pb.PlayerInput_LEFT:
+			currentAnimationState = pb.AnimationState_RUNNING_LEFT
+		case pb.PlayerInput_RIGHT:
+			currentAnimationState = pb.AnimationState_RUNNING_RIGHT
+		default:
+			currentAnimationState = pb.AnimationState_IDLE
+		}
+
 		// Create copies to prevent external modification of internal state
 		playerCopy := &pb.Player{
-			Id:   p.PlayerData.Id,
-			XPos: p.PlayerData.XPos,
-			YPos: p.PlayerData.YPos,
+			Id:                    p.PlayerData.Id,
+			XPos:                  p.PlayerData.XPos,
+			YPos:                  p.PlayerData.YPos,
+			CurrentAnimationState: currentAnimationState,
 		}
 		playerList = append(playerList, playerCopy)
 	}

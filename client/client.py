@@ -26,6 +26,10 @@ SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 BACKGROUND_COLOR = (0, 0, 50) # Dark blue
 PLAYER_SPRITE_PATH = "assets/player_large.png"
+SPRITE_SHEET_PATH = "assets/player_sheet_256.png"
+FRAME_WIDTH = 128
+FRAME_HEIGHT = 128
+RUNNING_SHEET_PATH = "assets/running_sheet.png"
 FPS = 60
 TILESET_PATH = "assets/tileset.png" # Path to tileset image
 
@@ -212,11 +216,15 @@ def run():
     global latest_game_state, current_direction, my_player_id
     global camera_x, camera_y, world_pixel_width, world_pixel_height, tile_size
 
-
     pygame.init()
     pygame.display.set_caption("Simple gRPC Game Client")
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     clock = pygame.time.Clock()
+
+    player_sprites = {}
+    directional_frames = {}
+    fallback_player_img = None
+    player_rect = pygame.Rect(0, 0, FRAME_WIDTH, FRAME_HEIGHT)
 
     # Load Assets
     try:
@@ -231,6 +239,23 @@ def run():
         player_img = pygame.image.load(PLAYER_SPRITE_PATH).convert_alpha()
         player_rect = player_img.get_rect()
         print(f"Loaded player sprite from {PLAYER_SPRITE_PATH}")
+
+        sheet_img = pygame.image.load(SPRITE_SHEET_PATH).convert_alpha()
+        print(f"Loaded sprite sheet from {SPRITE_SHEET_PATH}")
+        
+        up_rect = pygame.Rect(0, 0, FRAME_WIDTH, FRAME_HEIGHT)
+        down_rect = pygame.Rect(FRAME_WIDTH, 0, FRAME_WIDTH, FRAME_HEIGHT)
+        left_rect = pygame.Rect(0, FRAME_HEIGHT, FRAME_WIDTH, FRAME_HEIGHT)
+        right_rect = pygame.Rect(FRAME_WIDTH, FRAME_HEIGHT, FRAME_WIDTH, FRAME_HEIGHT)
+        directional_frames[game_pb2.AnimationState.RUNNING_UP] = sheet_img.subsurface(up_rect)
+        directional_frames[game_pb2.AnimationState.RUNNING_DOWN] = sheet_img.subsurface(down_rect)
+        directional_frames[game_pb2.AnimationState.RUNNING_LEFT] = sheet_img.subsurface(left_rect)
+        directional_frames[game_pb2.AnimationState.RUNNING_RIGHT] = sheet_img.subsurface(right_rect)
+        directional_frames[game_pb2.AnimationState.IDLE] = sheet_img.subsurface(down_rect)
+        directional_frames[game_pb2.AnimationState.UNKNOWN_STATE] = sheet_img.subsurface(down_rect)
+
+        print(f"Extracted {len(directional_frames)} directional frames.")
+        player_rect = directional_frames[game_pb2.AnimationState.IDLE].get_rect()        
 
     except pygame.error as e:
         print(f"Error loading player sprite: {e}")
@@ -335,23 +360,24 @@ def run():
 
             if current_state_snapshot:
                 for player in current_state_snapshot.players:
-                    screen_x = player.x_pos - camera_x
-                    screen_y = player.y_pos - camera_y
-                    player_rect.center = (int(screen_x), int(screen_y))
+                    player_state = player.current_animation_state
+                    current_frame_surface = directional_frames.get(player_state, directional_frames[game_pb2.AnimationState.UNKNOWN_STATE])
+                    
+                    if current_frame_surface:
+                        screen_x = player.x_pos - camera_x
+                        screen_y = player.y_pos - camera_y
+                        player_rect = current_frame_surface.get_rect()
+                        player_rect.center = (int(screen_x), int(screen_y))
 
-                    pos_x = int(player.x_pos)
-                    pos_y = int(player.y_pos)
-                    player_rect.center = (pos_x, pos_y)
+                        temp_sprite_frame = current_frame_surface.copy()
+                        color = assigned_colors.get(player.id, (255, 255, 255))
+                        tint_surface = pygame.Surface(player_rect.size, pygame.SRCALPHA)
+                        tint_surface.fill(color + (100,))  # Semi-transparent tint
+                        temp_sprite_frame.blit(tint_surface, (0,0), special_flags=pygame.BLEND_RGBA_MULT)
 
-                    color = assigned_colors.get(player.id, (255, 255, 255))
-                    temp_sprite = player_img.copy()
-                    tint_surface = pygame.Surface(player_rect.size, pygame.SRCALPHA)
-                    tint_surface.fill(color + (100,))  # Semi-transparent tint
-                    temp_sprite.blit(tint_surface, (0,0), special_flags=pygame.BLEND_RGBA_MULT)
-
-                    if player.id == local_id:
-                        pygame.draw.rect(screen, (255, 255, 255), player_rect.inflate(4, 4), 2)
-                    screen.blit(temp_sprite, player_rect)
+                        if player.id == local_id:
+                            pygame.draw.rect(screen, (255, 255, 255), player_rect.inflate(4, 4), 2)
+                        screen.blit(temp_sprite_frame, player_rect)
             
             pygame.display.flip()
             clock.tick(FPS)

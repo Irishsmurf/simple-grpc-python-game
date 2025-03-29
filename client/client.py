@@ -372,7 +372,7 @@ def run():
                         temp_sprite_frame = current_frame_surface.copy()
                         color = assigned_colors.get(player.id, (255, 255, 255))
                         tint_surface = pygame.Surface(player_rect.size, pygame.SRCALPHA)
-                        tint_surface.fill(color + (100,))  # Semi-transparent tint
+                        tint_surface.fill(color + (255,))  # Semi-transparent tint
                         temp_sprite_frame.blit(tint_surface, (0,0), special_flags=pygame.BLEND_RGBA_MULT)
 
                         if player.id == local_id:

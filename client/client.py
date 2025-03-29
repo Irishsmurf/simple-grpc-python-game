@@ -27,10 +27,13 @@ SCREEN_HEIGHT = 600
 BACKGROUND_COLOR = (0, 0, 50) # Dark blue
 PLAYER_SPRITE_PATH = "assets/player_large.png"
 FPS = 60
-TILE_SIZE = 32
 TILESET_PATH = "assets/tileset.png" # Path to tileset image
 
 world_map_data = None
+world_pixel_width = 0.0
+world_pixel_height = 0.0
+tile_size = 32 # Size of each tile in pixels
+
 map_width_tiles = 0
 map_height_tiles = 0
 map_lock = threading.Lock()
@@ -56,6 +59,7 @@ state_lock = threading.Lock()
 current_direction = game_pb2.PlayerInput.Direction.UNKNOWN
 direction_lock = threading.Lock()
 
+camera_x, camera_y = 0, 0
 
 def listen_for_updates(stub, send_input_func):
     """
@@ -64,6 +68,8 @@ def listen_for_updates(stub, send_input_func):
     """
     global latest_game_state, next_color_index
     global world_map_data, map_width_tiles, map_height_tiles
+    global world_pixel_width, world_pixel_height, tile_size
+
     print("Connecting to stream...")
     try:
         # --- Start the bidirectional stream ---
@@ -99,6 +105,11 @@ def listen_for_updates(stub, send_input_func):
                     world_map_data = temp_map
                     map_width_tiles = map_proto.tile_width
                     map_height_tiles = map_proto.tile_height
+                    world_pixel_height = map_proto.world_pixel_height
+                    world_pixel_width = map_proto.world_pixel_width
+                    tile_size = map_proto.tile_size_pixels
+                    print(f"World size: {world_pixel_width}x{world_pixel_height} px, Tile size: {tile_size}")
+
             else:
                  print("Warning: Did not receive valid map data.")
         except StopIteration:
@@ -198,8 +209,9 @@ def handle_input():
     print("Input handler finished.")
 
 def run():
-    global latest_game_state
-    global current_direction
+    global latest_game_state, current_direction, my_player_id
+    global camera_x, camera_y, world_pixel_width, world_pixel_height, tile_size
+
 
     pygame.init()
     pygame.display.set_caption("Simple gRPC Game Client")
@@ -211,8 +223,8 @@ def run():
         # Tile Assets
         tileset_img = pygame.image.load(TILESET_PATH).convert_alpha()
         print(f"Loaded tileset from {TILESET_PATH}")
-        tile_graphics[0] = tileset_img.subsurface((0, 0, TILE_SIZE, TILE_SIZE)) # Grass tile
-        tile_graphics[1] = tileset_img.subsurface((TILE_SIZE, 0, TILE_SIZE, TILE_SIZE)) # Wall tile
+        tile_graphics[0] = tileset_img.subsurface((0, 0, tile_size, tile_size)) # Grass tile
+        tile_graphics[1] = tileset_img.subsurface((tile_size, 0, tile_size, tile_size)) # Wall tile
         print(f"Loaded {len(tile_graphics)} tile graphics.")
 
         # Player Sprite
@@ -244,6 +256,7 @@ def run():
 
         # Main loop
         running = True
+        my_player_snapshot = None
         while running:
             new_direction = game_pb2.PlayerInput.Direction.UNKNOWN
             keys_pressed = pygame.key.get_pressed()
@@ -266,36 +279,66 @@ def run():
                     current_direction = new_direction
                     print(f"Direction changed to {game_pb2.PlayerInput.Direction.Name(current_direction)}")
             
-            screen.fill(BACKGROUND_COLOR)
-
-            # Draw the map
-            local_map_data = None
-            map_w, map_h = 0, 0
-            with map_lock:
-                local_map_data = world_map_data
-                map_w = map_width_tiles
-                map_h = map_height_tiles
-            if local_map_data:
-                for y in range(map_h):
-                    for x in range(map_w):
-                        tile_id = local_map_data[y][x]
-                        if tile_id in tile_graphics:
-                            tile_surface = tile_graphics[tile_id]
-                            screen.blit(tile_surface, (x * TILE_SIZE, y * TILE_SIZE))
 
             current_state_snapshot = None
             assigned_colors = {}
             local_id = my_player_id
+            my_player_snapshot = None
 
             with state_lock:
-                snapshot_read_debug = latest_game_state
                 if latest_game_state is not None:
                     current_state_snapshot = latest_game_state
+                    for p in current_state_snapshot.players:
+                        if p.id == local_id:
+                            my_player_snapshot = p
+                            break
             with color_lock:
                 assigned_colors = player_colors.copy()
 
+            if my_player_snapshot:
+                target_cam_x = my_player_snapshot.x_pos - SCREEN_WIDTH / 2
+                target_cam_y = my_player_snapshot.y_pos - SCREEN_HEIGHT / 2
+                
+                if world_pixel_width > SCREEN_WIDTH:
+                    camera_x = max(0.0, min(target_cam_x, world_pixel_width - SCREEN_WIDTH))
+                else:
+                    camera_x = (world_pixel_width - SCREEN_WIDTH) / 2
+
+                if world_pixel_height > SCREEN_HEIGHT:
+                    camera_y = max(0.0, min(target_cam_y, world_pixel_height - SCREEN_HEIGHT))
+                else:
+                    camera_y = (world_pixel_height - SCREEN_HEIGHT) / 2
+
+            screen.fill(BACKGROUND_COLOR)
+            # Draw the map
+            local_map_data = None
+            map_w, map_h = 0, 0
+            current_tile_size = 32
+            with map_lock:
+                local_map_data = world_map_data
+                map_w = map_width_tiles
+                map_h = map_height_tiles
+                if tile_size > 0:
+                    current_tile_size = tile_size
+            if local_map_data:
+                start_tile_x = max(0, int(camera_x / current_tile_size))
+                end_tile_x = min(map_w, int((camera_x + SCREEN_WIDTH) / current_tile_size))
+                start_tile_y = max(0, int(camera_y / current_tile_size))
+                end_tile_y = min(map_h, int((camera_y + SCREEN_HEIGHT) / current_tile_size))
+
+                for y in range(start_tile_y, end_tile_y):
+                    for x in range(start_tile_x, end_tile_x):
+                        tile_id = local_map_data[y][x]
+                        if tile_id in tile_graphics:
+                            tile_surface = tile_graphics[tile_id]
+                            screen.blit(tile_surface, (x * current_tile_size - camera_x, y * current_tile_size - camera_y))
+
             if current_state_snapshot:
                 for player in current_state_snapshot.players:
+                    screen_x = player.x_pos - camera_x
+                    screen_y = player.y_pos - camera_y
+                    player_rect.center = (int(screen_x), int(screen_y))
+
                     pos_x = int(player.x_pos)
                     pos_y = int(player.y_pos)
                     player_rect.center = (pos_x, pos_y)

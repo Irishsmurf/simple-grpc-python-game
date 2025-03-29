@@ -1,5 +1,7 @@
 grpcio==1.71.0
 grpcio-tools==1.71.0
+keyboard==0.13.5
+pillow==11.1.0
 protobuf==5.29.3
 pygame==2.6.1
 readchar==4.2.1

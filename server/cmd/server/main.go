@@ -29,6 +29,9 @@ type gameServer struct {
 const (
 	movementTimeout = 200 * time.Millisecond // Time between game ticks
 	tickRate        = 100 * time.Millisecond
+	tileSize        = 32            // Size of each tile in pixels
+	worldPixelW     = 32 * tileSize // Width of the world in pixels
+	worldPixelH     = 32 * tileSize // Height of the world in pixels
 )
 
 // NewGameServer creates an instance of our game server
@@ -64,9 +67,12 @@ func (s *gameServer) GameStream(stream pb.GameService_GameStreamServer) error {
 	}
 
 	initialMap := &pb.InitialMapData{
-		TileWidth:  int32(mapW),
-		TileHeight: int32(mapH),
-		Rows:       make([]*pb.MapRow, mapH),
+		TileWidth:        int32(mapW),
+		TileHeight:       int32(mapH),
+		Rows:             make([]*pb.MapRow, mapH),
+		WorldPixelHeight: worldPixelH,
+		WorldPixelWidth:  worldPixelW,
+		TileSizePixels:   tileSize,
 	}
 
 	for y, rowData := range mapGrid {

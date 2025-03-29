@@ -42,6 +42,10 @@ message InitialMapData {
     repeated MapRow rows = 1;
     int32 tile_width = 2;
     int32 tile_height = 3;
+
+    float world_pixel_height = 4;
+    float world_pixel_width = 5;
+    int32 tile_size_pixels = 6;
 }
 
 message ServerMessage {

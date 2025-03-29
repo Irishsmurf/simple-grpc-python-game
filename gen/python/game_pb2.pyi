@@ -51,14 +51,20 @@ class MapRow(_message.Message):
     def __init__(self, tiles: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class InitialMapData(_message.Message):
-    __slots__ = ("rows", "tile_width", "tile_height")
+    __slots__ = ("rows", "tile_width", "tile_height", "world_pixel_height", "world_pixel_width", "tile_size_pixels")
     ROWS_FIELD_NUMBER: _ClassVar[int]
     TILE_WIDTH_FIELD_NUMBER: _ClassVar[int]
     TILE_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    WORLD_PIXEL_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    WORLD_PIXEL_WIDTH_FIELD_NUMBER: _ClassVar[int]
+    TILE_SIZE_PIXELS_FIELD_NUMBER: _ClassVar[int]
     rows: _containers.RepeatedCompositeFieldContainer[MapRow]
     tile_width: int
     tile_height: int
-    def __init__(self, rows: _Optional[_Iterable[_Union[MapRow, _Mapping]]] = ..., tile_width: _Optional[int] = ..., tile_height: _Optional[int] = ...) -> None: ...
+    world_pixel_height: float
+    world_pixel_width: float
+    tile_size_pixels: int
+    def __init__(self, rows: _Optional[_Iterable[_Union[MapRow, _Mapping]]] = ..., tile_width: _Optional[int] = ..., tile_height: _Optional[int] = ..., world_pixel_height: _Optional[float] = ..., world_pixel_width: _Optional[float] = ..., tile_size_pixels: _Optional[int] = ...) -> None: ...
 
 class ServerMessage(_message.Message):
     __slots__ = ("initial_map_data", "game_state")

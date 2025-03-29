@@ -66,16 +66,18 @@ func loadMapFromFile(filePath string) ([][]TileType, int, int, error) {
 	var tileMap [][]TileType
 	width := -1
 
+	rowCount := 0
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
 		parts := strings.Fields(line)
+		currentPartsCount := len(parts)
 
 		if width == -1 {
-			width = len(parts)
-		} else if len(parts) != width {
+			width = currentPartsCount
+		} else if currentPartsCount != width {
 			return nil, 0, 0, fmt.Errorf("inconsistent row length in map file")
 		}
 
@@ -83,6 +85,7 @@ func loadMapFromFile(filePath string) ([][]TileType, int, int, error) {
 		for i, part := range parts {
 			tileInt, err := strconv.Atoi(part)
 			if err != nil {
+				log.Printf("Invalid TileID")
 				return nil, 0, 0, fmt.Errorf("invalid tile ID in map file: %s - %w", part, err)
 			}
 			tileID := TileType(tileInt)
@@ -90,9 +93,14 @@ func loadMapFromFile(filePath string) ([][]TileType, int, int, error) {
 				log.Printf("Invalid tile ID %d in map file, setting to Empty", tileID)
 				tileID = TileTypeEmpty
 			}
-			row[i] = tileID
+			if i < len(row) {
+				row[i] = tileID
+			} else {
+				log.Printf("ERROR: Index %d out of bounds for row slice with len %d (width %d)", i, len(row), width)
+			}
 		}
 		tileMap = append(tileMap, row)
+		rowCount++
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -125,6 +133,25 @@ func NewState() *State {
 		worldMap:      loadedMap,
 		mapTileHeight: height,
 		mapTileWidth:  width,
+	}
+
+	// Logging
+	actualHeight := len(newState.worldMap)
+	actualWidth := 0
+
+	if actualHeight > 0 {
+		// Check the length of the first row to get the actual width
+		actualWidth = len(newState.worldMap[0])
+	}
+
+	log.Printf("Map Loaded. Stored Dims: %d x %d. Actual Slice Dims: %d x %d.",
+		newState.mapTileWidth, newState.mapTileHeight,
+		actualWidth, actualHeight) // Note: Width/Height order convention
+
+	if newState.mapTileHeight != actualHeight || newState.mapTileWidth != actualWidth {
+		log.Printf("!!!! WARNING: Stored map dimensions do NOT match actual slice dimensions !!!!")
+		newState.mapTileWidth = actualWidth
+		newState.mapTileHeight = actualHeight
 	}
 
 	WorldMaxX = float32(newState.mapTileWidth * TileSize)
@@ -169,10 +196,11 @@ func (s *State) CheckMapCollision(pixelX, pixelY float32) bool {
 	minY := pixelY - PlayerHalfHeight
 	maxY := pixelY + PlayerHalfHeight
 
+	epsilon := float32(0.0001)
 	startTileX := int(minX / float32(TileSize))
-	endTileX := int(maxX / float32(TileSize))
+	endTileX := int((maxX - epsilon) / float32(TileSize))
 	startTileY := int(minY / float32(TileSize))
-	endTileY := int(maxY / float32(TileSize))
+	endTileY := int((maxY - epsilon) / float32(TileSize))
 
 	for ty := startTileY; ty <= endTileY; ty++ {
 		for tx := startTileX; tx <= endTileX; tx++ {
@@ -401,4 +429,15 @@ func (s *State) GetMapDataAndDimensions() ([][]TileType, int, int, error) {
 	}
 	// Consider returning a deep copy if map could change, but okay for now
 	return s.worldMap, s.mapTileWidth, s.mapTileHeight, nil
+}
+
+func (t TileType) String() string {
+	switch t {
+	case TileTypeEmpty:
+		return "Empty"
+	case TileTypeWall:
+		return "Wall"
+	default:
+		return "Unknown"
+	}
 }

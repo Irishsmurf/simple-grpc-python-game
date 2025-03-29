@@ -38,7 +38,7 @@ class GameServiceStub(object):
         self.GameStream = channel.stream_stream(
                 '/game.GameService/GameStream',
                 request_serializer=game__pb2.PlayerInput.SerializeToString,
-                response_deserializer=game__pb2.GameState.FromString,
+                response_deserializer=game__pb2.ServerMessage.FromString,
                 _registered_method=True)
 
 
@@ -48,7 +48,7 @@ class GameServiceServicer(object):
 
     def GameStream(self, request_iterator, context):
         """A bidirectional stream for real-time game updates and input
-        Client sends PlayerInput, Server streams GameState.
+        Client sends PlayerInput, Server streams ServerMessage.
         First message from Client *could* be special (e.g., name request)
         First message from Server *could* be special (e.g., assigned ID, initial state)
         """
@@ -62,7 +62,7 @@ def add_GameServiceServicer_to_server(servicer, server):
             'GameStream': grpc.stream_stream_rpc_method_handler(
                     servicer.GameStream,
                     request_deserializer=game__pb2.PlayerInput.FromString,
-                    response_serializer=game__pb2.GameState.SerializeToString,
+                    response_serializer=game__pb2.ServerMessage.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -92,7 +92,7 @@ class GameService(object):
             target,
             '/game.GameService/GameStream',
             game__pb2.PlayerInput.SerializeToString,
-            game__pb2.GameState.FromString,
+            game__pb2.ServerMessage.FromString,
             options,
             channel_credentials,
             insecure,

@@ -57,12 +57,34 @@ func (s *gameServer) GameStream(stream pb.GameService_GameStreamServer) error {
 		s.broadcastState() // Broadcast the updated state to all remaining players
 	}()
 
-	initialSelfState := &pb.GameState{
-		Players: []*pb.Player{player}, // Send the initial state to the player
+	mapGrid, mapW, mapH, mapErr := s.state.GetMapDataAndDimensions()
+	if mapErr != nil {
+		log.Printf("Error loading map for %s: %v", playerID, mapErr)
+		return mapErr
 	}
-	log.Printf("Sending initial state to player %s: %v", playerID, initialSelfState)
-	if err := stream.Send(initialSelfState); err != nil {
-		log.Printf("Error sending initial state to player %s: %v", playerID, err)
+
+	initialMap := &pb.InitialMapData{
+		TileWidth:  int32(mapW),
+		TileHeight: int32(mapH),
+		Rows:       make([]*pb.MapRow, mapH),
+	}
+
+	for y, rowData := range mapGrid {
+		rowTiles := make([]int32, mapW)
+		for x, tileID := range rowData {
+			rowTiles[x] = int32(tileID)
+		}
+		initialMap.Rows[y] = &pb.MapRow{Tiles: rowTiles}
+	}
+
+	mapMessage := &pb.ServerMessage{
+		Message: &pb.ServerMessage_InitialMapData{
+			InitialMapData: initialMap,
+		},
+	}
+	log.Printf("Sending initial map to player %s: %v", playerID, mapMessage)
+	if err := stream.Send(mapMessage); err != nil {
+		log.Printf("Error sending initial map to player %s: %v", playerID, err)
 		return err
 	}
 
@@ -116,14 +138,18 @@ func (s *gameServer) broadcastState() {
 	allPlayers := s.state.GetAllPlayers()
 	currentState := &pb.GameState{Players: allPlayers}
 
-	log.Printf("Broadcasting state with %d players to %d streams...", len(allPlayers), len(s.activeStreams))
+	stateMessage := &pb.ServerMessage{
+		Message: &pb.ServerMessage_GameState{
+			GameState: currentState,
+		},
+	}
 
 	// Iterate over a copy of the keys to avoid issues if removeStream is called concurrently?
 	// Or handle errors carefully inside the loop. Let's handle errors carefully.
 	deadStreams := []string{} // Keep track of streams that error out
 
 	for playerID, stream := range s.activeStreams {
-		err := stream.Send(currentState)
+		err := stream.Send(stateMessage)
 		if err != nil {
 			log.Printf("Error sending state to player %s: %v. Marking stream for removal.", playerID, err)
 			// Don't modify the map while iterating over it. Mark for removal.
@@ -134,10 +160,6 @@ func (s *gameServer) broadcastState() {
 	// Remove dead streams after iteration (still under the lock)
 	for _, playerID := range deadStreams {
 		delete(s.activeStreams, playerID)
-		// Note: We are not calling state.RemovePlayer here, as the disconnection
-		// should ideally be handled primarily where the stream context/error originates (in GameStream).
-		// If we remove the player state here too, ensure it's idempotent or handled correctly.
-		// For now, just remove the stream to stop broadcast attempts.
 		log.Printf("Dead stream removed during broadcast cleanup for player %s. Total streams: %d", playerID, len(s.activeStreams))
 	}
 }

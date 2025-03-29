@@ -34,12 +34,28 @@ message PlayerInput {
 // Empty message often useful for simple notifications or stream triggers
 message Empty {}
 
+message MapRow {
+    repeated int32 tiles = 1;
+}
+
+message InitialMapData {
+    repeated MapRow rows = 1;
+    int32 tile_width = 2;
+    int32 tile_height = 3;
+}
+
+message ServerMessage {
+    oneof message {
+        InitialMapData initial_map_data = 1;
+        GameState game_state = 2;
+    }
+}
 
 // The gRPC service definition - Using Bidirectional Stream
 service GameService {
   // A bidirectional stream for real-time game updates and input
-  // Client sends PlayerInput, Server streams GameState.
+  // Client sends PlayerInput, Server streams ServerMessage.
   // First message from Client *could* be special (e.g., name request)
   // First message from Server *could* be special (e.g., assigned ID, initial state)
-  rpc GameStream (stream PlayerInput) returns (stream GameState);
+  rpc GameStream (stream PlayerInput) returns (stream ServerMessage);
 }

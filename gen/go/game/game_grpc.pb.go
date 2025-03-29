@@ -23,7 +23,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type GameServiceClient interface {
 	// A bidirectional stream for real-time game updates and input
-	// Client sends PlayerInput, Server streams GameState.
+	// Client sends PlayerInput, Server streams ServerMessage.
 	// First message from Client *could* be special (e.g., name request)
 	// First message from Server *could* be special (e.g., assigned ID, initial state)
 	GameStream(ctx context.Context, opts ...grpc.CallOption) (GameService_GameStreamClient, error)
@@ -48,7 +48,7 @@ func (c *gameServiceClient) GameStream(ctx context.Context, opts ...grpc.CallOpt
 
 type GameService_GameStreamClient interface {
 	Send(*PlayerInput) error
-	Recv() (*GameState, error)
+	Recv() (*ServerMessage, error)
 	grpc.ClientStream
 }
 
@@ -60,8 +60,8 @@ func (x *gameServiceGameStreamClient) Send(m *PlayerInput) error {
 	return x.ClientStream.SendMsg(m)
 }
 
-func (x *gameServiceGameStreamClient) Recv() (*GameState, error) {
-	m := new(GameState)
+func (x *gameServiceGameStreamClient) Recv() (*ServerMessage, error) {
+	m := new(ServerMessage)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (x *gameServiceGameStreamClient) Recv() (*GameState, error) {
 // for forward compatibility
 type GameServiceServer interface {
 	// A bidirectional stream for real-time game updates and input
-	// Client sends PlayerInput, Server streams GameState.
+	// Client sends PlayerInput, Server streams ServerMessage.
 	// First message from Client *could* be special (e.g., name request)
 	// First message from Server *could* be special (e.g., assigned ID, initial state)
 	GameStream(GameService_GameStreamServer) error
@@ -105,7 +105,7 @@ func _GameService_GameStream_Handler(srv interface{}, stream grpc.ServerStream) 
 }
 
 type GameService_GameStreamServer interface {
-	Send(*GameState) error
+	Send(*ServerMessage) error
 	Recv() (*PlayerInput, error)
 	grpc.ServerStream
 }
@@ -114,7 +114,7 @@ type gameServiceGameStreamServer struct {
 	grpc.ServerStream
 }
 
-func (x *gameServiceGameStreamServer) Send(m *GameState) error {
+func (x *gameServiceGameStreamServer) Send(m *ServerMessage) error {
 	return x.ServerStream.SendMsg(m)
 }
 

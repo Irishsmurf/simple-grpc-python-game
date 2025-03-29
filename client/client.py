@@ -27,6 +27,14 @@ SCREEN_HEIGHT = 600
 BACKGROUND_COLOR = (0, 0, 50) # Dark blue
 PLAYER_SPRITE_PATH = "assets/player.png"
 FPS = 60
+TILE_SIZE = 32
+TILESET_PATH = "assets/tileset.png" # Path to tileset image
+
+world_map_data = None
+map_width_tiles = 0
+map_height_tiles = 0
+map_lock = threading.Lock()
+tile_graphics = {}
 
 my_player_id = None
 player_colors = {}
@@ -54,8 +62,8 @@ def listen_for_updates(stub, send_input_func):
     Listens for GameState updates from the server stream in a separate thread.
     Also handles sending PlayerInput messages periodically or on change.
     """
-    global latest_game_state
-    global next_color_index
+    global latest_game_state, next_color_index
+    global world_map_data, map_width_tiles, map_height_tiles
     print("Connecting to stream...")
     try:
         # --- Start the bidirectional stream ---
@@ -75,42 +83,63 @@ def listen_for_updates(stub, send_input_func):
 
                 time.sleep(0.1 / 30.0) # Adjust sleep time as needed (controls input send rate)
 
-
         stream = stub.GameStream(input_generator())
         print("Stream started. Waiting for game state updates...")
 
         try:
-            initial_state = next(stream) # Get the first message
-            if initial_state and initial_state.players:
-                my_player_id = initial_state.players[0].id
-                print(f"*** Received own player ID: {my_player_id} ***")
-                # Assign initial colors based on this first state
+            first_message = next(stream) # Get the first message
+            if first_message and first_message.HasField("initial_map_data"):
+                map_proto = first_message.initial_map_data
+                print(f"Received map data: {map_proto.tile_width}x{map_proto.tile_height} tiles")
+                temp_map = []
+                for y in range(map_proto.tile_height):
+                    row_proto = map_proto.rows[y]
+                    temp_map.append(list(row_proto.tiles))
+                with map_lock:
+                    world_map_data = temp_map
+                    map_width_tiles = map_proto.tile_width
+                    map_height_tiles = map_proto.tile_height
+            else:
+                 print("Warning: Did not receive valid map data.")
+        except StopIteration:
+            print("Error: Stream closed before map data received.")
+            return 
+        
+        try:
+            second_message = next(stream)
+            if second_message and second_message.HasField('game_state'):
+                 initial_game_state = second_message.game_state
+                 if initial_game_state and initial_game_state.players:
+                    my_player_id = initial_game_state.players[0].id
+                    print(f"*** Received own player ID: {my_player_id} ***")
+                    # Assign colors based on this first game state
+                    with color_lock:
+                         for p in initial_game_state.players:
+                            if p.id not in player_colors:
+                                 player_colors[p.id] = AVAILABLE_COLORS[next_color_index % len(AVAILABLE_COLORS)]
+                                 next_color_index += 1
+                    # Update shared state
+                    with state_lock:
+                         latest_game_state = initial_game_state
+                 else:
+                     print("Warning: Second message GameState had no players.")
+            else:
+                 print("Warning: Second message was not GameState!")
+        except StopIteration:
+                print("Error: Stream closed after initial map, before game state.")
+                return
+
+        # --- Receive Loop ---
+        for message in stream:
+            if message and message.HasField('game_state'):
+                state = message.game_state
+                with state_lock:
+                    latest_game_state = state
                 with color_lock:
-                    for p in initial_state.players:
+                    for p in state.players:
                         if p.id not in player_colors:
                             player_colors[p.id] = AVAILABLE_COLORS[next_color_index % len(AVAILABLE_COLORS)]
                             next_color_index += 1
-                # Update shared state with this initial message
-                with state_lock:
-                    latest_game_state = initial_state
-
-            else:
-                 print("Warning: Did not receive valid initial state message.")
-
-        except StopIteration:
-             print("Error: Stream closed before initial state received.")
-             return # Exit thread if stream closes immediately
-
-        # --- Receive Loop ---
-        for state in stream:
-            with state_lock:
-                latest_game_state = state
-            with color_lock:
-                for p in state.players:
-                    if p.id not in player_colors:
-                        player_colors[p.id] = AVAILABLE_COLORS[next_color_index % len(AVAILABLE_COLORS)]
-                        next_color_index += 1
-            player_ids = [p.id for p in state.players] if state and state.players else []
 
 
     except grpc.RpcError as e:
@@ -179,9 +208,18 @@ def run():
 
     # Load Assets
     try:
+        # Tile Assets
+        tileset_img = pygame.image.load(TILESET_PATH).convert_alpha()
+        print(f"Loaded tileset from {TILESET_PATH}")
+        tile_graphics[0] = tileset_img.subsurface((0, 0, TILE_SIZE, TILE_SIZE)) # Grass tile
+        tile_graphics[1] = tileset_img.subsurface((TILE_SIZE, 0, TILE_SIZE, TILE_SIZE)) # Wall tile
+        print(f"Loaded {len(tile_graphics)} tile graphics.")
+
+        # Player Sprite
         player_img = pygame.image.load(PLAYER_SPRITE_PATH).convert_alpha()
         player_rect = player_img.get_rect()
         print(f"Loaded player sprite from {PLAYER_SPRITE_PATH}")
+
     except pygame.error as e:
         print(f"Error loading player sprite: {e}")
         print("Ensure the asset path is correct and the file exists.")
@@ -229,6 +267,22 @@ def run():
                     print(f"Direction changed to {game_pb2.PlayerInput.Direction.Name(current_direction)}")
             
             screen.fill(BACKGROUND_COLOR)
+
+            # Draw the map
+            local_map_data = None
+            map_w, map_h = 0, 0
+            with map_lock:
+                local_map_data = world_map_data
+                map_w = map_width_tiles
+                map_h = map_height_tiles
+            if local_map_data:
+                for y in range(map_h):
+                    for x in range(map_w):
+                        tile_id = local_map_data[y][x]
+                        if tile_id in tile_graphics:
+                            tile_surface = tile_graphics[tile_id]
+                            screen.blit(tile_surface, (x * TILE_SIZE, y * TILE_SIZE))
+
             current_state_snapshot = None
             assigned_colors = {}
             local_id = my_player_id

@@ -43,3 +43,27 @@ class PlayerInput(_message.Message):
 class Empty(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class MapRow(_message.Message):
+    __slots__ = ("tiles",)
+    TILES_FIELD_NUMBER: _ClassVar[int]
+    tiles: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, tiles: _Optional[_Iterable[int]] = ...) -> None: ...
+
+class InitialMapData(_message.Message):
+    __slots__ = ("rows", "tile_width", "tile_height")
+    ROWS_FIELD_NUMBER: _ClassVar[int]
+    TILE_WIDTH_FIELD_NUMBER: _ClassVar[int]
+    TILE_HEIGHT_FIELD_NUMBER: _ClassVar[int]
+    rows: _containers.RepeatedCompositeFieldContainer[MapRow]
+    tile_width: int
+    tile_height: int
+    def __init__(self, rows: _Optional[_Iterable[_Union[MapRow, _Mapping]]] = ..., tile_width: _Optional[int] = ..., tile_height: _Optional[int] = ...) -> None: ...
+
+class ServerMessage(_message.Message):
+    __slots__ = ("initial_map_data", "game_state")
+    INITIAL_MAP_DATA_FIELD_NUMBER: _ClassVar[int]
+    GAME_STATE_FIELD_NUMBER: _ClassVar[int]
+    initial_map_data: InitialMapData
+    game_state: GameState
+    def __init__(self, initial_map_data: _Optional[_Union[InitialMapData, _Mapping]] = ..., game_state: _Optional[_Union[GameState, _Mapping]] = ...) -> None: ...

@@ -2,7 +2,12 @@
 package game
 
 import (
+	"bufio"
+	"fmt"
 	"log"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,12 +15,14 @@ import (
 	pb "simple-grpc-game/gen/go/game" // Adjust if your module path is different!
 )
 
-const (
+var (
 	WorldMinX float32 = 0.0
 	WorldMaxX float32 = 5000.0
 	WorldMinY float32 = 0.0
 	WorldMaxY float32 = 5000.0
+)
 
+const (
 	PlayerHalfWidth     float32 = 16.0
 	PlayerRadius        float32 = 16.0
 	MinPlayerSeperation float32 = PlayerRadius * 2.0
@@ -30,7 +37,9 @@ type State struct {
 	mu      sync.RWMutex // Read-write mutex for finer-grained locking (optional, Mutex is fine too)
 	players map[string]*trackedPlayer
 
-	worldMap [][]int
+	worldMap      [][]int
+	mapTileWidth  int
+	mapTileHeight int
 }
 
 type trackedPlayer struct {
@@ -39,31 +48,79 @@ type trackedPlayer struct {
 	LastDirection pb.PlayerInput_Direction
 }
 
+func loadMapFromFile(filePath string) ([][]int, int, int, error) {
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("failed to open map file: %s - %w", filePath, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	var tileMap [][]int
+	width := -1
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+
+		if width == -1 {
+			width = len(parts)
+		} else if len(parts) != width {
+			return nil, 0, 0, fmt.Errorf("inconsistent row length in map file")
+		}
+
+		row := make([]int, width)
+		for i, part := range parts {
+			tileID, err := strconv.Atoi(part)
+			if err != nil {
+				return nil, 0, 0, fmt.Errorf("invalid tile ID in map file: %s - %w", part, err)
+			}
+			row[i] = tileID
+		}
+		tileMap = append(tileMap, row)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, 0, 0, fmt.Errorf("error reading map file: %s - %w", filePath, err)
+	}
+
+	if len(tileMap) == 0 || width == -1 {
+		return nil, 0, 0, fmt.Errorf("map file is empty or invalid")
+	}
+
+	height := len(tileMap)
+	log.Printf("Loaded map from file: %s, dimensions: %dx%d", filePath, width, height)
+	return tileMap, width, height, nil
+}
+
 // NewState creates and initializes a new game state manager.
 func NewState() *State {
 
-	tileMap := make([][]int, MapTileHeight)
-	for y := range tileMap {
-		tileMap[y] = make([]int, MapTileWidth)
-		for x := range tileMap[y] {
-			if x == 0 || x == MapTileWidth-1 || y == 0 || y == MapTileHeight-1 {
-				tileMap[y][x] = 1 // Wall
-			} else {
-				tileMap[y][x] = 0 // Empty space
-			}
-		}
+	mapFilePath := "map.txt"
+	loadedMap, width, height, err := loadMapFromFile(mapFilePath)
+	if err != nil {
+		log.Fatalf("Error loading map from file: %s - using default map", err)
+	}
+	if width == 0 || height == 0 {
+		log.Fatalf("Invalid map dimensions: %dx%d - using default map", width, height)
 	}
 
-	tileMap[5][5] = 1
-	tileMap[5][6] = 1
-	tileMap[5][7] = 1
-	tileMap[6][7] = 1
-	tileMap[7][7] = 1
-
-	return &State{
-		players:  make(map[string]*trackedPlayer),
-		worldMap: tileMap,
+	newState := &State{
+		players:       make(map[string]*trackedPlayer),
+		worldMap:      loadedMap,
+		mapTileHeight: height,
+		mapTileWidth:  width,
 	}
+
+	WorldMaxX = float32(newState.mapTileWidth * TileSize)
+	WorldMaxY = float32(newState.mapTileHeight * TileSize)
+	log.Printf("World boundaries set to: X(%f, %f), Y(%f, %f)", WorldMinX, WorldMaxX, WorldMinY, WorldMaxY)
+
+	return newState
 }
 
 func (s *State) CheckPlayerCollision(playerID string, potentialX, potentialY float32) bool {
@@ -293,4 +350,22 @@ func (s *State) GetAllPlayers() []*pb.Player {
 		playerList = append(playerList, playerCopy)
 	}
 	return playerList
+}
+
+func (s *State) GetMapData() ([][]int, int, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// Return a copy? Or assume caller won't modify? For now, return direct reference.
+	// Be careful if map could change later!
+	return s.worldMap, s.mapTileWidth, s.mapTileHeight
+}
+
+func (s *State) GetMapDataAndDimensions() ([][]int, int, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.worldMap == nil || s.mapTileHeight == 0 || s.mapTileWidth == 0 {
+		return nil, 0, 0, fmt.Errorf("map data not loaded or invalid")
+	}
+	// Consider returning a deep copy if map could change, but okay for now
+	return s.worldMap, s.mapTileWidth, s.mapTileHeight, nil
 }

@@ -196,20 +196,30 @@ func (s *State) CheckMapCollision(pixelX, pixelY float32) bool {
 	minY := pixelY - PlayerHalfHeight
 	maxY := pixelY + PlayerHalfHeight
 
+	log.Printf("DEBUG CheckMapCollision: Pixel Bounds (MinX:%.1f, MaxX:%.1f, MinY:%.1f, MaxY:%.1f)", minX, maxX, minY, maxY)
+
 	epsilon := float32(0.0001)
 	startTileX := int(minX / float32(TileSize))
 	endTileX := int((maxX - epsilon) / float32(TileSize))
 	startTileY := int(minY / float32(TileSize))
 	endTileY := int((maxY - epsilon) / float32(TileSize))
 
+	log.Printf("DEBUG CheckMapCollision: Tile Range Check (X: %d to %d, Y: %d to %d)", startTileX, endTileX, startTileY, endTileY)
+
 	for ty := startTileY; ty <= endTileY; ty++ {
 		for tx := startTileX; tx <= endTileX; tx++ {
-			if tx < 0 || tx >= MapTileWidth || ty < 0 || ty >= MapTileHeight {
+			log.Printf("DEBUG CheckMapCollision: Checking tile (%d, %d)", tx, ty)
+
+			if tx < 0 || tx >= s.mapTileWidth || ty < 0 || ty >= s.mapTileHeight {
+				log.Printf("DEBUG CheckMapCollision: Collision! Tile (%d, %d) is outside map bounds (%dx%d)", tx, ty, s.mapTileWidth, s.mapTileHeight)
+
 				return true
 			}
 
 			tileType := s.worldMap[ty][tx]
 			if tileType == TileTypeWall { // Assuming 1 is a wall
+				log.Printf("DEBUG CheckMapCollision: Collision! Tile (%d, %d) is a Wall (%v)", tx, ty, tileType)
+
 				return true
 			}
 		}

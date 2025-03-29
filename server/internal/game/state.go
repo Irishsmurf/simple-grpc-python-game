@@ -23,13 +23,19 @@ var (
 )
 
 const (
-	PlayerHalfWidth     float32 = 16.0
-	PlayerRadius        float32 = 16.0
-	MinPlayerSeperation float32 = PlayerRadius * 2.0
+	PlayerHalfWidth  float32 = 32.0
+	PlayerHalfHeight float32 = 64.0
 
 	TileSize      int = 32
 	MapTileWidth  int = 25
 	MapTileHeight int = 20
+)
+
+type TileType int
+
+const (
+	TileTypeEmpty TileType = iota
+	TileTypeWall
 )
 
 // State manages the shared game state in a thread-safe manner.
@@ -37,7 +43,7 @@ type State struct {
 	mu      sync.RWMutex // Read-write mutex for finer-grained locking (optional, Mutex is fine too)
 	players map[string]*trackedPlayer
 
-	worldMap      [][]int
+	worldMap      [][]TileType
 	mapTileWidth  int
 	mapTileHeight int
 }
@@ -48,7 +54,7 @@ type trackedPlayer struct {
 	LastDirection pb.PlayerInput_Direction
 }
 
-func loadMapFromFile(filePath string) ([][]int, int, int, error) {
+func loadMapFromFile(filePath string) ([][]TileType, int, int, error) {
 
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -57,7 +63,7 @@ func loadMapFromFile(filePath string) ([][]int, int, int, error) {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	var tileMap [][]int
+	var tileMap [][]TileType
 	width := -1
 
 	for scanner.Scan() {
@@ -73,11 +79,16 @@ func loadMapFromFile(filePath string) ([][]int, int, int, error) {
 			return nil, 0, 0, fmt.Errorf("inconsistent row length in map file")
 		}
 
-		row := make([]int, width)
+		row := make([]TileType, width)
 		for i, part := range parts {
-			tileID, err := strconv.Atoi(part)
+			tileInt, err := strconv.Atoi(part)
 			if err != nil {
 				return nil, 0, 0, fmt.Errorf("invalid tile ID in map file: %s - %w", part, err)
+			}
+			tileID := TileType(tileInt)
+			if tileID < TileTypeEmpty || tileID > TileTypeWall {
+				log.Printf("Invalid tile ID %d in map file, setting to Empty", tileID)
+				tileID = TileTypeEmpty
 			}
 			row[i] = tileID
 		}
@@ -124,6 +135,11 @@ func NewState() *State {
 }
 
 func (s *State) CheckPlayerCollision(playerID string, potentialX, potentialY float32) bool {
+	moveLeft := potentialX - PlayerHalfWidth
+	moveRight := potentialX + PlayerHalfWidth
+	moveTop := potentialY - PlayerHalfHeight
+	moveBottom := potentialY + PlayerHalfHeight
+
 	for id, trackedPlayer := range s.players {
 		if id == playerID {
 			continue // Skip self
@@ -131,14 +147,15 @@ func (s *State) CheckPlayerCollision(playerID string, potentialX, potentialY flo
 
 		otherX := trackedPlayer.PlayerData.XPos
 		otherY := trackedPlayer.PlayerData.YPos
+		otherLeft := otherX - PlayerHalfWidth
+		otherRight := otherX + PlayerHalfWidth
+		otherTop := otherY - PlayerHalfHeight
+		otherBottom := otherY + PlayerHalfHeight
 
-		// Check distance between players
-		dx := potentialX - otherX
-		dy := potentialY - otherY
+		xOverlap := (moveLeft < otherRight) && (moveRight > otherLeft)
+		yOverlap := (moveTop < otherBottom) && (moveBottom > otherTop)
 
-		distanceSquared := (dx * dx) + (dy * dy)
-		if distanceSquared < MinPlayerSeperation*MinPlayerSeperation {
-			log.Print("Collision detected between players: ", playerID, " and ", id)
+		if xOverlap && yOverlap {
 			return true // Collision detected
 		}
 	}
@@ -146,15 +163,28 @@ func (s *State) CheckPlayerCollision(playerID string, potentialX, potentialY flo
 }
 
 func (s *State) CheckMapCollision(pixelX, pixelY float32) bool {
-	// Basic collision check against world boundaries
-	tileX := int(pixelX / float32(TileSize))
-	tileY := int(pixelY / float32(TileSize))
 
-	if tileX < 0 || tileX >= MapTileWidth || tileY < 0 || tileY >= MapTileHeight {
-		return true // Out of bounds
-	}
-	if s.worldMap[tileY][tileX] == 1 {
-		return true // Collision with wall
+	minX := pixelX - PlayerHalfWidth
+	maxX := pixelX + PlayerHalfWidth
+	minY := pixelY - PlayerHalfHeight
+	maxY := pixelY + PlayerHalfHeight
+
+	startTileX := int(minX / float32(TileSize))
+	endTileX := int(maxX / float32(TileSize))
+	startTileY := int(minY / float32(TileSize))
+	endTileY := int(maxY / float32(TileSize))
+
+	for ty := startTileY; ty <= endTileY; ty++ {
+		for tx := startTileX; tx <= endTileX; tx++ {
+			if tx < 0 || tx >= MapTileWidth || ty < 0 || ty >= MapTileHeight {
+				return true
+			}
+
+			tileType := s.worldMap[ty][tx]
+			if tileType == TileTypeWall { // Assuming 1 is a wall
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -262,7 +292,7 @@ func (s *State) ApplyInput(playerID string, direction pb.PlayerInput_Direction) 
 
 	if direction != pb.PlayerInput_UNKNOWN {
 		isMoving = true
-		moveSpeed := float32(1.0) // Example speed - could be configurable
+		moveSpeed := float32(5.0) // Example speed - could be configurable
 		switch direction {
 		case pb.PlayerInput_UP:
 			potentialY -= moveSpeed
@@ -274,10 +304,16 @@ func (s *State) ApplyInput(playerID string, direction pb.PlayerInput_Direction) 
 			potentialX += moveSpeed
 		}
 
-		if potentialX < WorldMinX {
+		if potentialX-PlayerHalfWidth < WorldMinX {
 			potentialX = WorldMinX
-		} else if potentialX > WorldMaxX {
+		} else if potentialX+PlayerHalfWidth > WorldMaxX {
 			potentialX = WorldMaxX
+		}
+
+		if potentialY-PlayerHalfHeight < WorldMinY {
+			potentialY = WorldMinY
+		} else if potentialY+PlayerHalfHeight > WorldMaxY {
+			potentialY = WorldMaxY
 		}
 
 		collidesWithMap := s.CheckMapCollision(potentialX, potentialY)
@@ -298,9 +334,6 @@ func (s *State) ApplyInput(playerID string, direction pb.PlayerInput_Direction) 
 			player.PlayerData.XPos = potentialX
 			player.PlayerData.YPos = potentialY
 		}
-
-		print("Player moved to: ", player.PlayerData.XPos, player.PlayerData.YPos)
-
 	}
 
 	// Return a copy to potentially avoid data races if used outside lock, though less critical here
@@ -352,7 +385,7 @@ func (s *State) GetAllPlayers() []*pb.Player {
 	return playerList
 }
 
-func (s *State) GetMapData() ([][]int, int, int) {
+func (s *State) GetMapData() ([][]TileType, int, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	// Return a copy? Or assume caller won't modify? For now, return direct reference.
@@ -360,7 +393,7 @@ func (s *State) GetMapData() ([][]int, int, int) {
 	return s.worldMap, s.mapTileWidth, s.mapTileHeight
 }
 
-func (s *State) GetMapDataAndDimensions() ([][]int, int, int, error) {
+func (s *State) GetMapDataAndDimensions() ([][]TileType, int, int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.worldMap == nil || s.mapTileHeight == 0 || s.mapTileWidth == 0 {

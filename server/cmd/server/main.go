@@ -82,7 +82,7 @@ func (s *gameServer) GameStream(stream pb.GameService_GameStreamServer) error {
 			InitialMapData: initialMap,
 		},
 	}
-	log.Printf("Sending initial map to player %s: %v", playerID, mapMessage)
+	log.Printf("Sending initial map to player %s", playerID)
 	if err := stream.Send(mapMessage); err != nil {
 		log.Printf("Error sending initial map to player %s: %v", playerID, err)
 		return err
@@ -102,9 +102,8 @@ func (s *gameServer) GameStream(stream pb.GameService_GameStreamServer) error {
 			return err // Exit if error
 		}
 
-		updatedPlayer, ok := s.state.ApplyInput(playerID, req.Direction)
+		_, ok := s.state.ApplyInput(playerID, req.Direction)
 		if ok {
-			log.Printf("Player %s moved to (%f, %f)", playerID, updatedPlayer.XPos, updatedPlayer.YPos)
 			s.broadcastState()
 		} else {
 			log.Printf("Failed to apply input for player %s (not found?)", playerID)

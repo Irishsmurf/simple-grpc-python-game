@@ -9,10 +9,25 @@ import (
 	pb "simple-grpc-game/gen/go/game" // Adjust if your module path is different!
 )
 
+const (
+	WorldMinX float32 = 0.0
+	WorldMaxX float32 = 5000.0
+	WorldMinY float32 = 0.0
+	WorldMaxY float32 = 5000.0
+
+	PlayerHalfWidth float32 = 16.0
+)
+
 // State manages the shared game state in a thread-safe manner.
 type State struct {
 	mu      sync.RWMutex // Read-write mutex for finer-grained locking (optional, Mutex is fine too)
 	players map[string]*trackedPlayer
+}
+
+type trackedPlayer struct {
+	PlayerData    *pb.Player
+	LastInputTime time.Time
+	LastDirection pb.PlayerInput_Direction
 }
 
 // NewState creates and initializes a new game state manager.
@@ -22,10 +37,12 @@ func NewState() *State {
 	}
 }
 
-type trackedPlayer struct {
-	PlayerData    *pb.Player
-	LastInputTime time.Time
-	LastDirection pb.PlayerInput_Direction
+func (s *State) CheckMapCollision(x, y float32) bool {
+	// Basic collision check against world boundaries
+	if x < WorldMinX || x > WorldMaxX || y < WorldMinY || y > WorldMaxY {
+		return true // Collision detected
+	}
+	return false // No collision
 }
 
 // GetAllPlayerIDs returns a slice of current player IDs. Thread-safe.
@@ -122,16 +139,41 @@ func (s *State) ApplyInput(playerID string, direction pb.PlayerInput_Direction) 
 	player.LastInputTime = time.Now() // Update the last input time
 	player.LastDirection = direction  // Update the last direction
 
-	moveSpeed := float32(5.0) // Example speed - could be configurable
-	switch direction {
-	case pb.PlayerInput_UP:
-		player.PlayerData.YPos -= moveSpeed
-	case pb.PlayerInput_DOWN:
-		player.PlayerData.YPos += moveSpeed
-	case pb.PlayerInput_LEFT:
-		player.PlayerData.XPos -= moveSpeed
-	case pb.PlayerInput_RIGHT:
-		player.PlayerData.XPos += moveSpeed
+	currentX := player.PlayerData.XPos
+	currentY := player.PlayerData.YPos
+	potentialX := currentX
+	potentialY := currentY
+
+	if direction != pb.PlayerInput_UNKNOWN {
+
+		moveSpeed := float32(1.0) // Example speed - could be configurable
+		switch direction {
+		case pb.PlayerInput_UP:
+			potentialY -= moveSpeed
+		case pb.PlayerInput_DOWN:
+			potentialY += moveSpeed
+		case pb.PlayerInput_LEFT:
+			potentialX -= moveSpeed
+		case pb.PlayerInput_RIGHT:
+			potentialX += moveSpeed
+		}
+
+		if potentialX < WorldMinX {
+			potentialX = WorldMinX
+		} else if potentialX > WorldMaxX {
+			potentialX = WorldMaxX
+		}
+
+		if potentialY < WorldMinY {
+			potentialY = WorldMinY
+		} else if potentialY > WorldMaxY {
+			potentialY = WorldMaxY
+		}
+		player.PlayerData.XPos = potentialX
+		player.PlayerData.YPos = potentialY
+
+		print("Player moved to: ", player.PlayerData.XPos, player.PlayerData.YPos)
+
 	}
 
 	// Return a copy to potentially avoid data races if used outside lock, though less critical here

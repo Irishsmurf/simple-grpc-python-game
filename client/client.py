@@ -103,7 +103,6 @@ def listen_for_updates(stub, send_input_func):
 
         # --- Receive Loop ---
         for state in stream:
-            print("\n--- Game State Update ---")
             with state_lock:
                 latest_game_state = state
             with color_lock:
@@ -112,7 +111,6 @@ def listen_for_updates(stub, send_input_func):
                         player_colors[p.id] = AVAILABLE_COLORS[next_color_index % len(AVAILABLE_COLORS)]
                         next_color_index += 1
             player_ids = [p.id for p in state.players] if state and state.players else []
-            print(f"DEBUG Listener: Received state update with player IDs: {player_ids}")
 
 
     except grpc.RpcError as e:

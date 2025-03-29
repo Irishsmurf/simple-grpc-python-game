@@ -28,6 +28,20 @@ BACKGROUND_COLOR = (0, 0, 50) # Dark blue
 PLAYER_SPRITE_PATH = "assets/player.png"
 FPS = 60
 
+my_player_id = None
+player_colors = {}
+color_lock = threading.Lock()
+AVAILABLE_COLORS = [
+    (255, 255, 0),   # Yellow (Original)
+    (0, 255, 255),   # Cyan
+    (255, 0, 255),   # Magenta
+    (0, 255, 0),     # Green
+    (255, 165, 0),   # Orange
+    (255, 255, 255), # White
+]
+next_color_index = 0
+
+
 latest_game_state = None
 state_lock = threading.Lock()
 
@@ -41,6 +55,7 @@ def listen_for_updates(stub, send_input_func):
     Also handles sending PlayerInput messages periodically or on change.
     """
     global latest_game_state
+    global next_color_index
     print("Connecting to stream...")
     try:
         # --- Start the bidirectional stream ---
@@ -64,11 +79,38 @@ def listen_for_updates(stub, send_input_func):
         stream = stub.GameStream(input_generator())
         print("Stream started. Waiting for game state updates...")
 
+        try:
+            initial_state = next(stream) # Get the first message
+            if initial_state and initial_state.players:
+                my_player_id = initial_state.players[0].id
+                print(f"*** Received own player ID: {my_player_id} ***")
+                # Assign initial colors based on this first state
+                with color_lock:
+                    for p in initial_state.players:
+                        if p.id not in player_colors:
+                            player_colors[p.id] = AVAILABLE_COLORS[next_color_index % len(AVAILABLE_COLORS)]
+                            next_color_index += 1
+                # Update shared state with this initial message
+                with state_lock:
+                    latest_game_state = initial_state
+
+            else:
+                 print("Warning: Did not receive valid initial state message.")
+
+        except StopIteration:
+             print("Error: Stream closed before initial state received.")
+             return # Exit thread if stream closes immediately
+
         # --- Receive Loop ---
         for state in stream:
             print("\n--- Game State Update ---")
             with state_lock:
                 latest_game_state = state
+            with color_lock:
+                for p in state.players:
+                    if p.id not in player_colors:
+                        player_colors[p.id] = AVAILABLE_COLORS[next_color_index % len(AVAILABLE_COLORS)]
+                        next_color_index += 1
             player_ids = [p.id for p in state.players] if state and state.players else []
             print(f"DEBUG Listener: Received state update with player IDs: {player_ids}")
 
@@ -189,19 +231,32 @@ def run():
                     print(f"Direction changed to {game_pb2.PlayerInput.Direction.Name(current_direction)}")
             
             screen.fill(BACKGROUND_COLOR)
-
-            # Draw the player sprite at the current position
             current_state_snapshot = None
+            assigned_colors = {}
+            local_id = my_player_id
+
             with state_lock:
                 snapshot_read_debug = latest_game_state
                 if latest_game_state is not None:
                     current_state_snapshot = latest_game_state
+            with color_lock:
+                assigned_colors = player_colors.copy()
+
             if current_state_snapshot:
                 for player in current_state_snapshot.players:
                     pos_x = int(player.x_pos)
                     pos_y = int(player.y_pos)
                     player_rect.center = (pos_x, pos_y)
-                    screen.blit(player_img, player_rect)
+
+                    color = assigned_colors.get(player.id, (255, 255, 255))
+                    temp_sprite = player_img.copy()
+                    tint_surface = pygame.Surface(player_rect.size, pygame.SRCALPHA)
+                    tint_surface.fill(color + (100,))  # Semi-transparent tint
+                    temp_sprite.blit(tint_surface, (0,0), special_flags=pygame.BLEND_RGBA_MULT)
+
+                    if player.id == local_id:
+                        pygame.draw.rect(screen, (255, 255, 255), player_rect.inflate(4, 4), 2)
+                    screen.blit(temp_sprite, player_rect)
             
             pygame.display.flip()
             clock.tick(FPS)

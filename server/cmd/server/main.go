@@ -57,6 +57,15 @@ func (s *gameServer) GameStream(stream pb.GameService_GameStreamServer) error {
 		s.broadcastState() // Broadcast the updated state to all remaining players
 	}()
 
+	initialSelfState := &pb.GameState{
+		Players: []*pb.Player{player}, // Send the initial state to the player
+	}
+	log.Printf("Sending initial state to player %s: %v", playerID, initialSelfState)
+	if err := stream.Send(initialSelfState); err != nil {
+		log.Printf("Error sending initial state to player %s: %v", playerID, err)
+		return err
+	}
+
 	log.Printf("Player %s connected. Total streams: %d", playerID, len(s.activeStreams))
 	s.broadcastState() // Broadcast the initial state to all players
 

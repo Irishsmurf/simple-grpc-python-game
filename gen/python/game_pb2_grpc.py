@@ -37,7 +37,7 @@ class GameServiceStub(object):
         """
         self.GameStream = channel.stream_stream(
                 '/game.GameService/GameStream',
-                request_serializer=game__pb2.PlayerInput.SerializeToString,
+                request_serializer=game__pb2.ClientMessage.SerializeToString,
                 response_deserializer=game__pb2.ServerMessage.FromString,
                 _registered_method=True)
 
@@ -58,7 +58,7 @@ def add_GameServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'GameStream': grpc.stream_stream_rpc_method_handler(
                     servicer.GameStream,
-                    request_deserializer=game__pb2.PlayerInput.FromString,
+                    request_deserializer=game__pb2.ClientMessage.FromString,
                     response_serializer=game__pb2.ServerMessage.SerializeToString,
             ),
     }
@@ -88,7 +88,7 @@ class GameService(object):
             request_iterator,
             target,
             '/game.GameService/GameStream',
-            game__pb2.PlayerInput.SerializeToString,
+            game__pb2.ClientMessage.SerializeToString,
             game__pb2.ServerMessage.FromString,
             options,
             channel_credentials,

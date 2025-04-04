@@ -22,16 +22,18 @@ RUNNING_LEFT: AnimationState
 RUNNING_RIGHT: AnimationState
 
 class Player(_message.Message):
-    __slots__ = ("id", "x_pos", "y_pos", "current_animation_state")
+    __slots__ = ("id", "x_pos", "y_pos", "current_animation_state", "username")
     ID_FIELD_NUMBER: _ClassVar[int]
     X_POS_FIELD_NUMBER: _ClassVar[int]
     Y_POS_FIELD_NUMBER: _ClassVar[int]
     CURRENT_ANIMATION_STATE_FIELD_NUMBER: _ClassVar[int]
+    USERNAME_FIELD_NUMBER: _ClassVar[int]
     id: str
     x_pos: float
     y_pos: float
     current_animation_state: AnimationState
-    def __init__(self, id: _Optional[str] = ..., x_pos: _Optional[float] = ..., y_pos: _Optional[float] = ..., current_animation_state: _Optional[_Union[AnimationState, str]] = ...) -> None: ...
+    username: str
+    def __init__(self, id: _Optional[str] = ..., x_pos: _Optional[float] = ..., y_pos: _Optional[float] = ..., current_animation_state: _Optional[_Union[AnimationState, str]] = ..., username: _Optional[str] = ...) -> None: ...
 
 class GameState(_message.Message):
     __slots__ = ("players",)
@@ -96,3 +98,17 @@ class ServerMessage(_message.Message):
     initial_map_data: InitialMapData
     delta_update: DeltaUpdate
     def __init__(self, initial_map_data: _Optional[_Union[InitialMapData, _Mapping]] = ..., delta_update: _Optional[_Union[DeltaUpdate, _Mapping]] = ...) -> None: ...
+
+class ClientHello(_message.Message):
+    __slots__ = ("desired_username",)
+    DESIRED_USERNAME_FIELD_NUMBER: _ClassVar[int]
+    desired_username: str
+    def __init__(self, desired_username: _Optional[str] = ...) -> None: ...
+
+class ClientMessage(_message.Message):
+    __slots__ = ("player_input", "client_hello")
+    PLAYER_INPUT_FIELD_NUMBER: _ClassVar[int]
+    CLIENT_HELLO_FIELD_NUMBER: _ClassVar[int]
+    player_input: PlayerInput
+    client_hello: ClientHello
+    def __init__(self, player_input: _Optional[_Union[PlayerInput, _Mapping]] = ..., client_hello: _Optional[_Union[ClientHello, _Mapping]] = ...) -> None: ...

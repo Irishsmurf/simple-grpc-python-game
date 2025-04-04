@@ -10,6 +10,7 @@ message Player {
   float x_pos = 2;
   float y_pos = 3;
   AnimationState current_animation_state = 4;
+  string username = 5;
 }
 
 // Represents the entire game state (used internally by client/server now, not sent directly)
@@ -62,6 +63,17 @@ message ServerMessage {
   }
 }
 
+message ClientHello {
+  string desired_username = 1; // The username the client wants to use
+}
+
+message ClientMessage {
+  oneof client_message {
+    PlayerInput player_input = 1; // Player input message
+    ClientHello client_hello = 2; // Client hello message
+  }
+}
+
 // Animation states for the player character
 enum AnimationState {
   UNKNOWN_STATE = 0;
@@ -76,5 +88,5 @@ enum AnimationState {
 // The gRPC service definition - Using Bidirectional Stream
 service GameService {
   // A bidirectional stream for real-time game updates and input
-  rpc GameStream (stream PlayerInput) returns (stream ServerMessage);
+  rpc GameStream (stream ClientMessage) returns (stream ServerMessage);
 }

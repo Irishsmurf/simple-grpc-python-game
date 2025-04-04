@@ -44,7 +44,7 @@ func (c *gameServiceClient) GameStream(ctx context.Context, opts ...grpc.CallOpt
 }
 
 type GameService_GameStreamClient interface {
-	Send(*PlayerInput) error
+	Send(*ClientMessage) error
 	Recv() (*ServerMessage, error)
 	grpc.ClientStream
 }
@@ -53,7 +53,7 @@ type gameServiceGameStreamClient struct {
 	grpc.ClientStream
 }
 
-func (x *gameServiceGameStreamClient) Send(m *PlayerInput) error {
+func (x *gameServiceGameStreamClient) Send(m *ClientMessage) error {
 	return x.ClientStream.SendMsg(m)
 }
 
@@ -100,7 +100,7 @@ func _GameService_GameStream_Handler(srv interface{}, stream grpc.ServerStream) 
 
 type GameService_GameStreamServer interface {
 	Send(*ServerMessage) error
-	Recv() (*PlayerInput, error)
+	Recv() (*ClientMessage, error)
 	grpc.ServerStream
 }
 
@@ -112,8 +112,8 @@ func (x *gameServiceGameStreamServer) Send(m *ServerMessage) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func (x *gameServiceGameStreamServer) Recv() (*PlayerInput, error) {
-	m := new(PlayerInput)
+func (x *gameServiceGameStreamServer) Recv() (*ClientMessage, error) {
+	m := new(ClientMessage)
 	if err := x.ServerStream.RecvMsg(m); err != nil {
 		return nil, err
 	}

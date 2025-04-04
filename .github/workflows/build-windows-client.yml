@@ -37,17 +37,6 @@ jobs:
           --add-data "gen/python;gen/python" ^
           --clean ^
           client/client.py
-        # Explanation of PyInstaller flags:
-        # --onefile: Bundle everything into a single .exe file.
-        # --windowed: Don't show a console window when the app runs (good for GUI/Pygame). Use --console if you need the console.
-        # --name GameClient: Sets the name of the output executable.
-        # --add-data "source;destination": Bundles data files.
-        #    - "client/assets;assets": Copies the contents of client/assets into an 'assets' folder inside the bundle.
-        #    - "gen/python;gen/python": Copies the generated Python protobuf files into a 'gen/python' structure inside the bundle.
-        #    - Use ';' as the path separator on Windows.
-        # --clean: Clean PyInstaller cache and temporary files before building.
-        # client/client.py: The main Python script to bundle.
-        # ^ : Line continuation character for Windows cmd/batch style commands in run block
       shell: cmd # Use cmd shell for PyInstaller on Windows, respecting path separators
 
     - name: Upload artifact

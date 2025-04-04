@@ -1,0 +1,58 @@
+name: Build Windows Client
+
+on:
+  push:
+    branches: [ "main" ] # Trigger on pushes to the main branch
+    paths: # Only run if relevant files change
+      - 'client/**'
+      - 'gen/python/**'
+      - '.github/workflows/build-windows-client.yml'
+  workflow_dispatch: # Allow manual triggering from the Actions tab
+
+jobs:
+  build-windows:
+    runs-on: windows-latest # Use the latest Windows runner
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4 # Checks out your code
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9' # Or your desired Python version (e.g., 3.10, 3.11)
+        cache: 'pip' # Cache pip dependencies
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Install PyInstaller and requirements from the client directory
+        pip install pyinstaller setuptools wheel
+        pip install -r client/requirements.txt
+      shell: bash # Use bash shell for consistency in commands
+
+    - name: Build executable with PyInstaller
+      run: |
+        pyinstaller --onefile --windowed --name GameClient ^
+          --add-data "client/assets;assets" ^
+          --add-data "gen/python;gen/python" ^
+          --clean ^
+          client/client.py
+        # Explanation of PyInstaller flags:
+        # --onefile: Bundle everything into a single .exe file.
+        # --windowed: Don't show a console window when the app runs (good for GUI/Pygame). Use --console if you need the console.
+        # --name GameClient: Sets the name of the output executable.
+        # --add-data "source;destination": Bundles data files.
+        #    - "client/assets;assets": Copies the contents of client/assets into an 'assets' folder inside the bundle.
+        #    - "gen/python;gen/python": Copies the generated Python protobuf files into a 'gen/python' structure inside the bundle.
+        #    - Use ';' as the path separator on Windows.
+        # --clean: Clean PyInstaller cache and temporary files before building.
+        # client/client.py: The main Python script to bundle.
+        # ^ : Line continuation character for Windows cmd/batch style commands in run block
+      shell: cmd # Use cmd shell for PyInstaller on Windows, respecting path separators
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: GameClient-Windows # Name of the artifact zip file
+        path: dist/GameClient.exe # Path to the generated executable

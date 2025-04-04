@@ -6,17 +6,30 @@ import os
 import pygame
 from queue import Queue, Empty as QueueEmpty # Use Queue for state updates
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        # The destination path used in --add-data becomes the relative path base here.
+        base_path = sys._MEIPASS
+    except Exception:
+        # If not running in PyInstaller bundle, use the script's directory
+        base_path = os.path.abspath(os.path.dirname(__file__))
+
+    return os.path.join(base_path, relative_path)
+
 # --- Configuration ---
 SERVER_ADDRESS = "192.168.41.108:50051" # Server address and port
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 BACKGROUND_COLOR = (0, 0, 50) # Dark blue
 PLAYER_SPRITE_PATH = "assets/player_large.png" # Fallback? Sprite sheet is used.
-SPRITE_SHEET_PATH = "assets/player_sheet_256.png"
 FRAME_WIDTH = 128
 FRAME_HEIGHT = 128
-TILESET_PATH = "assets/tileset.png" # Path to tileset image
 FPS = 60
+
+TILESET_PATH = resource_path("assets/tileset.png")
+SPRITE_SHEET_PATH = resource_path("assets/player_sheet_256.png")
 
 # --- Attempt to import generated code ---
 # Add the parent directory ('simple-grpc-game') to sys.path to find 'gen'

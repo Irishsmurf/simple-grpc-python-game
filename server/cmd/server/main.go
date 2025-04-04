@@ -201,10 +201,13 @@ func (s *gameServer) gameTick() {
 }
 
 func main() {
-	port := ":50051" // Port for the gRPC server to listen on
-	lis, err := net.Listen("tcp", port)
+	listenIP := "0.0.0.0" // Listen on all interfaces
+	listenPort := "50051" // Port for the gRPC server to listen on
+
+	listenAddress := net.JoinHostPort(listenIP, listenPort)
+	lis, err := net.Listen("tcp", listenAddress)
 	if err != nil {
-		log.Fatalf("Failed to listen on port %s: %v", port, err)
+		log.Fatalf("Failed to listen on port %s: %v", listenPort, err)
 	}
 
 	// Create a new gRPC server instance
@@ -227,7 +230,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("Starting gRPC server on %s", port)
+	log.Printf("Starting gRPC server on %s", listenAddress)
 	// Start listening for incoming connections
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("Failed to serve gRPC server: %v", err)

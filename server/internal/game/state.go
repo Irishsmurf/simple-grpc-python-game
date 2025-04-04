@@ -330,7 +330,7 @@ func (s *State) ApplyInput(playerID string, direction pb.PlayerInput_Direction) 
 
 	if direction != pb.PlayerInput_UNKNOWN {
 		isMoving = true
-		moveSpeed := float32(2) // Example speed - could be configurable
+		moveSpeed := float32(10) // Example speed - could be configurable
 		switch direction {
 		case pb.PlayerInput_UP:
 			potentialY -= moveSpeed

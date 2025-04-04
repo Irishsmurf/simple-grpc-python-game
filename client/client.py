@@ -6,12 +6,14 @@ import os
 import pygame
 from queue import Queue, Empty as QueueEmpty
 from collections import deque
-import textwrap  # For chat text wrapping
+import textwrap
+import hashlib  # For username color hashing
 
 # --- Helper function for PyInstaller ---
 
 
 def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
         base_path = sys._MEIPASS
     except Exception:
@@ -27,11 +29,13 @@ BACKGROUND_COLOR = (0, 0, 50)
 FPS = 60
 SPRITE_SHEET_PATH = resource_path("assets/player_sheet_256.png")
 TILESET_PATH = resource_path("assets/tileset.png")
+# Assumes font is in client/fonts/
+FONT_PATH = resource_path("fonts/DejaVuSansMono.ttf")
 FRAME_WIDTH = 128
 FRAME_HEIGHT = 128
 MAX_CHAT_HISTORY = 7
 CHAT_INPUT_MAX_LEN = 100
-CHAT_DISPLAY_WIDTH = 60  # Approx characters width for wrapping
+CHAT_DISPLAY_WIDTH = 70
 
 # --- Attempt to import generated code ---
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -51,11 +55,21 @@ except ModuleNotFoundError as e:
 # --- Color Palette ---
 AVAILABLE_COLORS = [(255, 255, 0), (0, 255, 255), (255, 0, 255),
                     (0, 255, 0), (255, 165, 0), (255, 255, 255)]
+# Chat Colors
+CHAT_TIMESTAMP_COLOR = (150, 150, 150)
+CHAT_DEFAULT_USERNAME_COLOR = (210, 210, 210)
+CHAT_MY_MESSAGE_COLOR = (220, 220, 100)
+CHAT_OTHER_MESSAGE_COLOR = (255, 255, 255)
+CHAT_INPUT_PROMPT_COLOR = (200, 255, 200)
+CHAT_INPUT_ACTIVE_COLOR = (255, 255, 255)
+CHAT_INPUT_BOX_COLOR_ACTIVE = (50, 50, 100)
+CHAT_INPUT_BOX_COLOR_INACTIVE = (30, 30, 60)
+CHAT_INPUT_BORDER_COLOR_ACTIVE = (150, 150, 255)
+CHAT_HISTORY_BG_COLOR = (0, 0, 0, 150)  # Semi-transparent black
+
 
 # --- Game State Manager ---
-
-
-class GameStateManager:
+class GameStateManager:  # ... (No changes needed) ...
     def __init__(self):
         self.state_lock = threading.Lock()
         self.map_lock = threading.Lock()
@@ -141,7 +155,7 @@ class GameStateManager:
 # --- Network Handler ---
 
 
-class NetworkHandler:
+class NetworkHandler:  # ... (No changes needed) ...
     def __init__(self, server_address, state_manager, output_queue):
         self.server_address = server_address
         self.state_manager = state_manager
@@ -160,44 +174,43 @@ class NetworkHandler:
         self, username): self._username_to_send = username if username else "Player"
 
     def _message_generator(self):
-        """Generator yields ClientHello, then messages from outgoing_queue, then PlayerInput."""
         print(
-            f"NetHandler: Sending ClientHello for '{self._username_to_send}'")
+            f"NetHandler GEN: Sending ClientHello for '{self._username_to_send}'")
         hello_msg = game_pb2.ClientHello(
             desired_username=self._username_to_send)
         yield game_pb2.ClientMessage(client_hello=hello_msg)
-        print("NetHandler: ClientHello sent.")
+        print("NetHandler GEN: ClientHello sent.")
         self._stream_started.set()
-
         while not self.stop_event.is_set():
-            outgoing_msg = None
+            outgoing_msg_to_yield = None
             try:
                 retrieved_item = self.outgoing_queue.get_nowait()
                 if isinstance(retrieved_item, game_pb2.ClientMessage):
-                    outgoing_msg = retrieved_item
+                    outgoing_msg_to_yield = retrieved_item
                     print(f"NetHandler GEN: Found ClientMessage in outgoing queue!")
                 else:
                     print(
-                        f"NetHandler GEN: Error - Unexpected item type in outgoing queue: {type(retrieved_item)}")
+                        f"NetHandler GEN: Error - Unexpected item type: {type(retrieved_item)}")
                     raise QueueEmpty
             except QueueEmpty:
                 with self.direction_lock:
                     dir_to_send = self.input_direction
                 input_msg = game_pb2.PlayerInput(direction=dir_to_send)
-                outgoing_msg = game_pb2.ClientMessage(player_input=input_msg)
+                outgoing_msg_to_yield = game_pb2.ClientMessage(
+                    player_input=input_msg)
             except Exception as e:
                 print(
                     f"NetHandler GEN OutQueue Err: Type={type(e).__name__}, Msg='{e}'")
                 with self.direction_lock:
                     dir_to_send = self.input_direction
-                input_msg = game_pb2.PlayerInput(direction=dir_to_send)
-                outgoing_msg = game_pb2.ClientMessage(player_input=input_msg)
-            if outgoing_msg:
-                msg_type = outgoing_msg.WhichOneof('payload')
-                yield outgoing_msg
+                    input_msg = game_pb2.PlayerInput(direction=dir_to_send)
+                    outgoing_msg_to_yield = game_pb2.ClientMessage(
+                        player_input=input_msg)
+            if outgoing_msg_to_yield:
+                msg_type = outgoing_msg_to_yield.WhichOneof('payload')
+                yield outgoing_msg_to_yield
             else:
-                print(
-                    "NetHandler GEN: Warning - No message prepared to yield this iteration.")
+                print("NetHandler GEN: Warning - No message to yield.")
             time.sleep(1.0 / 30.0)
 
     def _listen_for_updates(self):
@@ -239,12 +252,14 @@ class NetworkHandler:
         if self._stream_started.is_set() and text:
             chat_req = game_pb2.SendChatMessageRequest(message_text=text)
             client_msg = game_pb2.ClientMessage(send_chat_message=chat_req)
+            print(f"NetHandler SEND: Putting chat: '{text[:30]}...'")
             self.outgoing_queue.put(client_msg)
-            print(f"NetHandler: Queued chat: {text[:20]}...")
+            print(
+                f"NetHandler SEND: OutQueue size: {self.outgoing_queue.qsize()}")
         elif not text:
-            print("NetHandler: Ignoring empty chat.")
+            print("NetHandler SEND: Ignoring empty chat.")
         else:
-            print("NetHandler: Stream not ready for chat.")
+            print("NetHandler SEND: Stream not ready.")
 
     def start(self):
         print(f"NetHandler: Connecting to {self.server_address}...")
@@ -289,28 +304,18 @@ class NetworkHandler:
                 if self.input_direction != new_direction:
                     self.input_direction = new_direction
 
-# --- Input Handler (Simplified: Handles movement + quit only) ---
+# --- Input Handler (Simplified) ---
 
 
-class InputHandler:
-    def __init__(self):
+class InputHandler:  # ... (unchanged) ...
+    def __init__(self): 
         self.current_direction = game_pb2.PlayerInput.Direction.UNKNOWN
         self.quit_requested = False
 
     def handle_events_for_movement(self):
-        """Processes Pygame events only for movement keys and quit signals."""
-        # Called only when chat is NOT active
-        self.quit_requested = False  # Reset quit request each frame it's checked
+        self.quit_requested = False
         new_direction = game_pb2.PlayerInput.Direction.UNKNOWN
-
-        # Check only relevant events (QUIT, ESC, movement keys)
-        # KeyDown for ESC is handled by GameClient now
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.quit_requested = True
-                return self.current_direction  # Return last known direction
-
-        # Check pressed keys for movement
+        pygame.event.pump()
         keys_pressed = pygame.key.get_pressed()
         if keys_pressed[pygame.K_w] or keys_pressed[pygame.K_UP]:
             new_direction = game_pb2.PlayerInput.Direction.UP
@@ -320,16 +325,11 @@ class InputHandler:
             new_direction = game_pb2.PlayerInput.Direction.LEFT
         elif keys_pressed[pygame.K_d] or keys_pressed[pygame.K_RIGHT]:
             new_direction = game_pb2.PlayerInput.Direction.RIGHT
-
         if self.current_direction != new_direction:
             self.current_direction = new_direction
-
         return self.current_direction
 
     def check_quit_event(self):
-        """Checks only for the QUIT event, separated for clarity."""
-        # Call this every frame regardless of chat state
-        # More efficient check
         for event in pygame.event.get(eventtype=pygame.QUIT):
             self.quit_requested = True
             return True
@@ -338,83 +338,87 @@ class InputHandler:
     def should_quit(self): return self.quit_requested
 
 
-# *** NEW: Chat Manager Class ***
+# --- Chat Manager Class (Draw BG Added) ---
 class ChatManager:
-    """Handles chat UI state, input, and rendering."""
+    """Handles chat UI state, input, and rendering with UI polish."""
 
     def __init__(self, max_history=MAX_CHAT_HISTORY):
         self.active = False
         self.input_text = ""
         self.history = deque(maxlen=max_history)
-        self.font = pygame.font.SysFont(None, 22)
-        self.input_font = pygame.font.SysFont(
-            None, 24)  # Slightly larger for input
-        self.text_color = (255, 255, 255)
-        self.input_prompt_color = (200, 255, 200)
-        self.input_active_color = (255, 255, 255)
-        self.input_box_color = (40, 40, 80)  # Background for input box
-        # Semi-transparent black for history
-        self.history_bg_color = (0, 0, 0, 150)
+        self.my_username = ""
+        try:
+            self.font = pygame.font.Font(FONT_PATH, 14)
+            self.input_font = pygame.font.Font(FONT_PATH, 16)
+            print(f"ChatManager: Loaded font '{FONT_PATH}'")
+        except pygame.error as e:
+            print(
+                f"Warning: Could not load font '{FONT_PATH}'. Using default SysFont. Error: {e}")
+            self.font = pygame.font.SysFont(None, 22)
+            self.input_font = pygame.font.SysFont(None, 24)
+        # Colors defined globally
 
-    def toggle_active(self):
-        """Toggles chat input mode."""
+    # ... (unchanged) ...
+    def set_my_username(self, username): self.my_username = username
+
+    def _get_color_for_username(self, username):  # ... (unchanged) ...
+        if not username:
+            return CHAT_DEFAULT_USERNAME_COLOR
+        hasher = hashlib.sha1(username.encode('utf-8'))
+        hash_bytes = hasher.digest()
+        r = 100 + (hash_bytes[0] % 156)
+        g = 100 + (hash_bytes[1] % 156)
+        b = 100 + (hash_bytes[2] % 156)
+        return (r, g, b)
+
+    def toggle_active(self):  # ... (unchanged) ...
         self.active = not self.active
         if self.active:
-            self.input_text = ""  # Clear text when activating
-            pygame.key.set_repeat(500, 50)  # Enable key repeat for typing
+            self.input_text = ""
+            pygame.key.set_repeat(500, 50)
             print("Chat Activated")
         else:
-            pygame.key.set_repeat(0, 0)  # Disable key repeat
+            pygame.key.set_repeat(0, 0)
             print("Chat Deactivated")
         return self.active
 
-    def is_active(self):
-        """Returns True if chat input is active."""
-        return self.active
+    def is_active(self): return self.active  # ... (unchanged) ...
 
-    def add_message(self, chat_message_proto):
-        """Adds a received ChatMessage proto to the history."""
-        self.history.append(chat_message_proto)
+    def add_message(self, chat_message_proto):  # ... (unchanged) ...
+        timestamp = time.time()
+        self.history.append(
+            (timestamp, chat_message_proto.sender_username, chat_message_proto.message_text))
 
-    def handle_input_event(self, event):
-        """
-        Processes a Pygame KEYDOWN event when chat is active.
-        Returns the message string to send if Enter was pressed, else None.
-        Returns False if chat should be deactivated (e.g. Esc).
-        """
+    def handle_input_event(self, event):  # ... (unchanged) ...
         if not self.active or event.type != pygame.KEYDOWN:
-            return None  # Should not be called if inactive
-
+            return None
         message_to_send = None
         deactivate_chat = False
-
         if event.key == pygame.K_RETURN or event.key == pygame.K_KP_ENTER:
             if self.input_text:
                 message_to_send = self.input_text
             self.input_text = ""
-            deactivate_chat = True  # Deactivate after sending/attempting
+            deactivate_chat = True
         elif event.key == pygame.K_BACKSPACE:
             self.input_text = self.input_text[:-1]
         elif event.key == pygame.K_ESCAPE:
             self.input_text = ""
-            deactivate_chat = True  # Deactivate on Escape
-        elif event.unicode.isprintable():  # Append printable characters
+            deactivate_chat = True
+        elif event.unicode.isprintable():
             if len(self.input_text) < CHAT_INPUT_MAX_LEN:
                 self.input_text += event.unicode
-
         if deactivate_chat:
-            self.toggle_active()  # Use toggle to handle state change and key repeat
+            self.toggle_active()
+        return message_to_send
 
-        return message_to_send  # Return the message string or None
-
+    # ... (unchanged helper) ...
     def _render_text_wrapped(self, screen, text, rect, font, color):
-        """Helper to render text with basic wrapping."""
-        lines = textwrap.wrap(
-            text, width=CHAT_DISPLAY_WIDTH)  # Adjust width as needed
+        lines = textwrap.wrap(text, width=CHAT_DISPLAY_WIDTH,
+                              replace_whitespace=False, drop_whitespace=False)
         y = rect.top
         line_height = font.get_linesize()
         for line in lines:
-            if y + line_height > rect.bottom:  # Stop if exceeding rect height
+            if y + line_height > rect.bottom:
                 break
             try:
                 line_surface = font.render(line, True, color)
@@ -422,72 +426,123 @@ class ChatManager:
                 y += line_height
             except pygame.error as e:
                 print(f"Warn: Render failed for line '{line[:10]}...': {e}")
-                y += line_height  # Skip line but advance position
+                y += line_height
 
     def draw(self, screen):
-        """Draws the chat history and input field."""
-        # Draw History (Top Left)
+        """Draws the chat history and input field with UI polish."""
         history_x = 10
         history_y = 10
         line_height = self.font.get_linesize()
-        history_height_limit = line_height * \
-            MAX_CHAT_HISTORY + 10  # Max height for history
-        history_area_rect = pygame.Rect(
-            history_x, history_y, SCREEN_WIDTH - 20, history_height_limit)
+        history_render_limit = line_height * MAX_CHAT_HISTORY
+        max_history_width = SCREEN_WIDTH * 0.6  # Limit history width
+        # Calculate actual height needed based on messages to draw
+        messages_to_draw = list(self.history)[-MAX_CHAT_HISTORY:]
+        # Simplified height, wrap complicates this
+        actual_history_height = len(messages_to_draw) * line_height
+        history_area_rect = pygame.Rect(history_x, history_y, max_history_width, min(
+            history_render_limit, actual_history_height + 10))  # Adjust height slightly
 
-        # Optional: Draw semi-transparent background for history
-        # history_bg_surf = pygame.Surface(history_area_rect.size, pygame.SRCALPHA)
-        # history_bg_surf.fill(self.history_bg_color)
-        # screen.blit(history_bg_surf, history_area_rect.topleft)
+        # *** ADDED: Draw semi-transparent background for history ***
+        if messages_to_draw:  # Only draw if there's history
+            history_bg_surf = pygame.Surface(
+                history_area_rect.size, pygame.SRCALPHA)
+            history_bg_surf.fill(CHAT_HISTORY_BG_COLOR)
+            screen.blit(history_bg_surf, history_area_rect.topleft)
 
-        current_y = history_y
-        for msg in self.history:
-            prefix = f"{msg.sender_username}: "
-            full_text = prefix + msg.message_text
-            # Simple wrapping (consider a dedicated text wrapping function for complex needs)
-            wrapped_lines = textwrap.wrap(
-                full_text, width=CHAT_DISPLAY_WIDTH)  # Adjust width estimate
-
-            for line in wrapped_lines:
-                if current_y + line_height > history_y + history_height_limit:
-                    break  # Stop if exceeding area
-                try:
-                    line_surf = self.font.render(line, True, self.text_color)
-                    # Small padding
-                    screen.blit(line_surf, (history_x + 2, current_y))
-                    current_y += line_height
-                except pygame.error as e:
-                    print(
-                        f"Warn: Render failed for chat line '{line[:10]}...': {e}")
-                    current_y += line_height  # Skip line
-            if current_y > history_y + history_height_limit:
+        # --- Draw History Text (on top of background) ---
+        current_y = history_y + 5  # Start text slightly inside the bg rect
+        for timestamp, sender, message in messages_to_draw:
+            if current_y >= history_y + history_render_limit:
                 break
 
-        # Draw Input Field (Bottom Left)
+            time_str = time.strftime("[%H:%M:%S]", time.localtime(timestamp))
+            try:
+                time_surf = self.font.render(
+                    time_str, True, CHAT_TIMESTAMP_COLOR)
+                time_rect = time_surf.get_rect(
+                    left=history_x + 5, top=current_y)
+                screen.blit(time_surf, time_rect)
+                current_x = time_rect.right + 5
+            except pygame.error as e:
+                print(f"Warn: Render timestamp fail: {e}")
+                current_x = history_x + 5
+
+            username_color = self._get_color_for_username(sender)
+            try:
+                user_surf = self.font.render(sender, True, username_color)
+                user_rect = user_surf.get_rect(left=current_x, top=current_y)
+                screen.blit(user_surf, user_rect)
+                current_x = user_rect.right
+            except pygame.error as e:
+                print(f"Warn: Render username fail: {e}")
+
+            message_color = CHAT_MY_MESSAGE_COLOR if sender == self.my_username else CHAT_OTHER_MESSAGE_COLOR
+            message_prefix = ": "
+            try:
+                prefix_surf = self.font.render(
+                    message_prefix, True, message_color)
+                prefix_rect = prefix_surf.get_rect(
+                    left=current_x, top=current_y)
+                screen.blit(prefix_surf, prefix_rect)
+                text_start_x = prefix_rect.right
+            except pygame.error as e:
+                print(f"Warn: Render prefix fail: {e}")
+                text_start_x = current_x + 5
+
+            available_width = max(
+                10, (history_x + max_history_width) - text_start_x)
+            char_width_approx = self.font.size("A")[0]
+            wrap_width = max(
+                10, int(available_width / char_width_approx)) if char_width_approx > 0 else 20
+            wrapped_lines = textwrap.wrap(
+                message, width=wrap_width, replace_whitespace=False, drop_whitespace=False)
+
+            start_line_y = current_y
+            line_idx = 0
+            for line in wrapped_lines:
+                if current_y >= history_y + history_render_limit:
+                    break
+                try:
+                    line_surf = self.font.render(line, True, message_color)
+                    line_x = text_start_x if line_idx == 0 else text_start_x + 5  # Indent subsequent
+                    screen.blit(line_surf, (line_x, current_y))
+                    current_y += line_height
+                    line_idx += 1
+                except pygame.error as e:
+                    print(f"Warn: Render chat line fail: {e}")
+                    current_y += line_height
+            if current_y == start_line_y:
+                current_y += line_height  # Ensure Y advances even if rendering failed
+            if current_y > history_y + history_render_limit:
+                break
+
+        # --- Draw Input Field (unchanged styling from previous) ---
+        input_rect_base = pygame.Rect(5, SCREEN_HEIGHT - 5 - (self.input_font.get_linesize(
+        ) + 8), SCREEN_WIDTH - 10, self.input_font.get_linesize() + 8)
         if self.active:
             prompt = "Say: "
             display_text = prompt + self.input_text
             if time.time() % 1.0 < 0.5:
-                display_text += "_"  # Blinking cursor
+                display_text += "_"
+            pygame.draw.rect(screen, CHAT_INPUT_BOX_COLOR_ACTIVE,
+                             input_rect_base, border_radius=3)
+            pygame.draw.rect(screen, CHAT_INPUT_BORDER_COLOR_ACTIVE,
+                             input_rect_base, width=1, border_radius=3)
             input_surf = self.input_font.render(
-                display_text, True, self.input_active_color)
+                display_text, True, CHAT_INPUT_ACTIVE_COLOR)
             input_rect = input_surf.get_rect(
-                left=10, bottom=SCREEN_HEIGHT - 10)
-            # Draw background box for input
-            bg_rect = input_rect.inflate(10, 6)
-            bg_rect.bottom = SCREEN_HEIGHT - 5  # Align bottom
-            pygame.draw.rect(screen, self.input_box_color,
-                             bg_rect, border_radius=5)
+                left=input_rect_base.left + 5, centery=input_rect_base.centery)
             screen.blit(input_surf, input_rect)
         else:
-            # Show toggle hint when inactive
             hint_surf = self.font.render("[T] to chat", True, (150, 150, 150))
-            hint_rect = hint_surf.get_rect(left=10, bottom=SCREEN_HEIGHT - 10)
+            hint_rect = hint_surf.get_rect(
+                left=input_rect_base.left + 5, centery=input_rect_base.centery)
+            # pygame.draw.rect(screen, CHAT_INPUT_BOX_COLOR_INACTIVE, input_rect_base, border_radius=3) # Optional inactive bg
             screen.blit(hint_surf, hint_rect)
 
 
-# --- Renderer (Simplified - delegates chat drawing) ---
-class Renderer:
+# --- Renderer (Simplified) ---
+class Renderer:  # ... (unchanged) ...
     def __init__(self, screen_width, screen_height):
         self.screen_width = screen_width
         self.screen_height = screen_height
@@ -496,9 +551,8 @@ class Renderer:
         pygame.font.init()
         self.error_font = pygame.font.SysFont(None, 26)
         self.error_text_color = (255, 100, 100)
-        self.username_font = pygame.font.SysFont(None, 32)
+        self.username_font = pygame.font.SysFont(None, 20)
         self.username_color = (230, 230, 230)
-        # Chat fonts removed - managed by ChatManager
         self.directional_frames = {}
         self.tile_graphics = {}
         self.player_rect = None
@@ -602,40 +656,36 @@ class Renderer:
             center=(self.screen_width//2, self.screen_height//2))
         self.screen.blit(surf, rect)
 
-    # *** CHANGED: Render only draws game world, no chat ***
     def render_game_world(self, state_manager):
-        """Renders only the map and players."""
         error_msg = state_manager.get_connection_error()
         if error_msg:
             self.screen.fill(BACKGROUND_COLOR)
             self.draw_error_message(error_msg)
-            return False  # Indicate error state
+            return False
         else:
             current_player_map = state_manager.get_state_snapshot_map()
             map_data, map_w, map_h, tile_size = state_manager.get_map_data()
             my_player_id = state_manager.get_my_player_id()
             player_colors = state_manager.get_all_player_colors()
-
             my_player_snapshot = current_player_map.get(my_player_id)
             if my_player_snapshot:
                 world_w, world_h = state_manager.get_world_dimensions()
                 self.update_camera(my_player_snapshot.x_pos,
                                    my_player_snapshot.y_pos, world_w, world_h)
-
             self.screen.fill(BACKGROUND_COLOR)
             self.draw_map(map_data, map_w, map_h, tile_size)
             self.draw_players(current_player_map, player_colors, my_player_id)
-            return True  # Indicate success
+            return True
+
+# --- Game Client (Uses Polished ChatManager) ---
 
 
-# --- Game Client (Uses ChatManager) ---
-class GameClient:
+class GameClient:  # ... (unchanged) ...
     def __init__(self):
         pygame.init()
         self.state_manager = GameStateManager()
         self.renderer = Renderer(SCREEN_WIDTH, SCREEN_HEIGHT)
-        self.input_handler = InputHandler()  # Simplified input handler
-        # *** NEW: Instantiate ChatManager ***
+        self.input_handler = InputHandler()
         self.chat_manager = ChatManager()
         self.clock = pygame.time.Clock()
         self.server_message_queue = Queue()
@@ -683,21 +733,18 @@ class GameClient:
             self.clock.tick(30)
         return input_text
 
-    # *** CHANGED: Pass chat messages to ChatManager ***
     def _process_server_messages(self):
         try:
             while True:
                 message_type, message_data = self.server_message_queue.get_nowait()
                 if message_type == "map_data":
                     self.state_manager.set_initial_map_data(message_data)
-                    _, _, _, tile_size = self.state_manager.get_map_data()
-                    if self.renderer.tile_size != tile_size:
-                        self.renderer.tile_size = tile_size
+                    _, _, _, ts = self.state_manager.get_map_data()
+                    self.renderer.tile_size = ts
                 elif message_type == "delta_update":
                     self.state_manager.apply_delta_update(message_data)
                 elif message_type == "chat":
-                    self.chat_manager.add_message(
-                        message_data)  # Add to chat history
+                    self.chat_manager.add_message(message_data)
                 else:
                     print(f"Warn: Unknown queue msg type: {message_type}")
         except QueueEmpty:
@@ -712,26 +759,26 @@ class GameClient:
             return
         print(f"Username: {self.username}")
         self.network_handler.set_username(self.username)
+        self.chat_manager.set_my_username(
+            self.username)  # Set username in ChatManager
 
         self.running = True
         if not self.network_handler.start():
             print("Failed network start.")
             self.running = False
-            while True:  # Error display
+            while True:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                         pygame.quit()
                         return
-                # Pass dummy chat state to renderer during error display
-                self.renderer.render_game_world(self.state_manager)
-                # Draw chat UI even on error screen? Maybe not.
-                self.chat_manager.draw(self.renderer.screen)
+                render_ok = self.renderer.render_game_world(self.state_manager)
+                # if render_ok: self.chat_manager.draw(self.renderer.screen) # Maybe omit chat on error screen
                 pygame.display.flip()
                 self.clock.tick(10)
 
         print("Waiting for player ID...")
         wait_start_time = time.time()
-        while self.state_manager.get_my_player_id() is None and self.running:  # Wait loop
+        while self.state_manager.get_my_player_id() is None and self.running:
             self._process_server_messages()
             if self.network_handler.stop_event.is_set():
                 print("Net stopped waiting for ID.")
@@ -752,65 +799,39 @@ class GameClient:
                 print("Stop event.")
                 self.running = False
                 continue
-
-            # --- Input Handling Refactored ---
             message_to_send = None
-            # 1. Check for global quit events first
             if self.input_handler.check_quit_event():
                 self.running = False
                 continue
-
-            # 2. Process other events (Keyboard)
-            for event in pygame.event.get():  # Process other events like KEYDOWN
+            for event in pygame.event.get():
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        self.running = False
-                        break  # Handle ESC globally
+                        if self.chat_manager.is_active():
+                            self.chat_manager.toggle_active()
+                        else:
+                            self.running = False
+                            break
                     elif event.key == pygame.K_t and not self.chat_manager.is_active():
                         self.chat_manager.toggle_active()
                     elif self.chat_manager.is_active():
-                        # Pass event to chat manager if active
                         message_to_send = self.chat_manager.handle_input_event(
                             event)
-                # Handle other event types if needed
-
             if not self.running:
-                continue  # Check if ESC quit
-
-            # 3. Handle Movement Input (if chat not active)
+                continue
             if not self.chat_manager.is_active():
                 current_direction = self.input_handler.handle_events_for_movement()
                 self.network_handler.update_input_direction(current_direction)
-                if self.input_handler.should_quit():  # Check if QUIT event was caught by movement handler
-                    self.running = False
-                    continue
             else:
-                # Ensure player stops when chat is active
                 self.network_handler.update_input_direction(
                     game_pb2.PlayerInput.Direction.UNKNOWN)
-
-            # 4. Send Chat Message if ready
             if message_to_send:
                 self.network_handler.send_chat_message(message_to_send)
-            # --- End Input Handling ---
-
-            # Process incoming messages
             self._process_server_messages()
-
-            # --- Rendering Refactored ---
-            # 1. Render the game world
             render_ok = self.renderer.render_game_world(self.state_manager)
-
-            # 2. Render the chat UI on top (only if game world render was ok)
             if render_ok:
                 self.chat_manager.draw(self.renderer.screen)
-
-            # 3. Update the display
             pygame.display.flip()
-            # --- End Rendering ---
-
             self.clock.tick(FPS)
-
         print("Client: Exiting loop.")
         self.shutdown()
 

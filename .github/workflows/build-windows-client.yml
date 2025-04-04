@@ -26,7 +26,6 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # Install PyInstaller and requirements from the client directory
         pip install pyinstaller setuptools wheel
         pip install -r client/requirements.txt
       shell: bash # Use bash shell for consistency in commands

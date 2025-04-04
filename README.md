@@ -71,14 +71,19 @@ This project is a basic demonstration of a real-time 2D multiplayer game archite
 If you modify `game.proto`, you need to regenerate the Go and Python code. Run the following command from the project root directory:
 
 ```bash
-protoc --proto_path=. \
-       --go_out=./gen/go --go-grpc_out=./gen/go \
-       --python_out=./gen/python --pyi_out=./gen/python --grpc_python_out=./gen/python \
-       game.proto
+protoc --proto_path=proto \                                                                                                                                                                                                                                                    ─╯
+       --go_out=./gen/go/game --go_opt=paths=source_relative \
+       --go-grpc_out=./gen/go/game --go-grpc_opt=paths=source_relative \
+       proto/game.proto
+```
 (Ensure protoc, protoc-gen-go, protoc-gen-go-grpc, and the Python plugins are accessible in your PATH)Running the ProjectRun the Server:Open a terminal in the project root.# Run with default IP/Port (check main.go for defaults)
+```shell
 go run ./server/cmd/server/main.go
+```
 
 # Or specify IP and Port
+```shell
 go run ./server/cmd/server/main.go -ip 0.0.0.0 -port 50055
 Run the Client:Important: Ensure the SERVER_ADDRESS constant near the top of client/client.py matches the IP and port the server is listening on.Open another terminal in the project root.python client/client.py
 You can run multiple client instances to see the multiplayer aspect.Building the Client (Windows)A GitHub Actions workflow is included in .github/workflows/build-windows-client.yml. When changes are pushed to the main branch (or triggered manually):The workflow runs on a Windows environment.It installs Python, dependencies, and PyInstaller.It builds client/client.py into a single executable (GameClient.exe) using PyInstaller, bundling assets and generated code.The executable is uploaded as a workflow artifact named GameClient-Windows, which can be downloaded from the Actions tab on GitHub.*(Manual build: You can run the pyinstaller command from
+```

@@ -23,9 +23,6 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type GameServiceClient interface {
 	// A bidirectional stream for real-time game updates and input
-	// Client sends PlayerInput, Server streams ServerMessage.
-	// First message from Client *could* be special (e.g., name request)
-	// First message from Server *could* be special (e.g., assigned ID, initial state)
 	GameStream(ctx context.Context, opts ...grpc.CallOption) (GameService_GameStreamClient, error)
 }
 
@@ -73,9 +70,6 @@ func (x *gameServiceGameStreamClient) Recv() (*ServerMessage, error) {
 // for forward compatibility
 type GameServiceServer interface {
 	// A bidirectional stream for real-time game updates and input
-	// Client sends PlayerInput, Server streams ServerMessage.
-	// First message from Client *could* be special (e.g., name request)
-	// First message from Server *could* be special (e.g., assigned ID, initial state)
 	GameStream(GameService_GameStreamServer) error
 	mustEmbedUnimplementedGameServiceServer()
 }

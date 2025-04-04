@@ -57,10 +57,6 @@ class PlayerInput(_message.Message):
     direction: PlayerInput.Direction
     def __init__(self, direction: _Optional[_Union[PlayerInput.Direction, str]] = ...) -> None: ...
 
-class Empty(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
-
 class MapRow(_message.Message):
     __slots__ = ("tiles",)
     TILES_FIELD_NUMBER: _ClassVar[int]
@@ -85,10 +81,18 @@ class InitialMapData(_message.Message):
     assigned_player_id: str
     def __init__(self, rows: _Optional[_Iterable[_Union[MapRow, _Mapping]]] = ..., tile_width: _Optional[int] = ..., tile_height: _Optional[int] = ..., world_pixel_height: _Optional[float] = ..., world_pixel_width: _Optional[float] = ..., tile_size_pixels: _Optional[int] = ..., assigned_player_id: _Optional[str] = ...) -> None: ...
 
+class DeltaUpdate(_message.Message):
+    __slots__ = ("updated_players", "removed_player_ids")
+    UPDATED_PLAYERS_FIELD_NUMBER: _ClassVar[int]
+    REMOVED_PLAYER_IDS_FIELD_NUMBER: _ClassVar[int]
+    updated_players: _containers.RepeatedCompositeFieldContainer[Player]
+    removed_player_ids: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, updated_players: _Optional[_Iterable[_Union[Player, _Mapping]]] = ..., removed_player_ids: _Optional[_Iterable[str]] = ...) -> None: ...
+
 class ServerMessage(_message.Message):
-    __slots__ = ("initial_map_data", "game_state")
+    __slots__ = ("initial_map_data", "delta_update")
     INITIAL_MAP_DATA_FIELD_NUMBER: _ClassVar[int]
-    GAME_STATE_FIELD_NUMBER: _ClassVar[int]
+    DELTA_UPDATE_FIELD_NUMBER: _ClassVar[int]
     initial_map_data: InitialMapData
-    game_state: GameState
-    def __init__(self, initial_map_data: _Optional[_Union[InitialMapData, _Mapping]] = ..., game_state: _Optional[_Union[GameState, _Mapping]] = ...) -> None: ...
+    delta_update: DeltaUpdate
+    def __init__(self, initial_map_data: _Optional[_Union[InitialMapData, _Mapping]] = ..., delta_update: _Optional[_Union[DeltaUpdate, _Mapping]] = ...) -> None: ...

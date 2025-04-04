@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import game_pb2 as game__pb2
+import game_pb2 as game__pb2
 
 GRPC_GENERATED_VERSION = '1.71.0'
 GRPC_VERSION = grpc.__version__
@@ -48,9 +48,6 @@ class GameServiceServicer(object):
 
     def GameStream(self, request_iterator, context):
         """A bidirectional stream for real-time game updates and input
-        Client sends PlayerInput, Server streams ServerMessage.
-        First message from Client *could* be special (e.g., name request)
-        First message from Server *could* be special (e.g., assigned ID, initial state)
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')

@@ -2,17 +2,7 @@ syntax = "proto3";
 
 package game;
 
-// Option for Go package path - adjust if your Go module path is different
-option go_package = "simple-grpc-game/gen/go/game"; // Tells protoc where to output Go code relative to module root
-
-enum AnimationState {
-    UNKNOWN_STATE = 0;
-    IDLE = 1;
-    RUNNING_UP = 2;
-    RUNNING_DOWN = 3;
-    RUNNING_LEFT = 4;
-    RUNNING_RIGHT = 5; 
-}
+option go_package = "simple-grpc-game/gen/go/game";
 
 // Represents a player in the game
 message Player {
@@ -22,7 +12,7 @@ message Player {
   AnimationState current_animation_state = 4;
 }
 
-// Represents the entire game state to be sent to clients
+// Represents the entire game state (used internally by client/server now, not sent directly)
 message GameState {
   repeated Player players = 1; // List of all players currently in the game
 }
@@ -36,41 +26,55 @@ message PlayerInput {
     LEFT = 3;
     RIGHT = 4;
   }
-  Direction direction = 1;
-  // Could add delta time or magnitude later
+  Direction direction = 1; // Could add delta time or magnitude later
 }
 
-// Empty message often useful for simple notifications or stream triggers
-message Empty {}
-
+// Represents a row of tiles in the map
 message MapRow {
-    repeated int32 tiles = 1;
+  repeated int32 tiles = 1; // Use int32 for tile IDs
 }
 
+// Data sent once when a client connects
 message InitialMapData {
-    repeated MapRow rows = 1;
-    int32 tile_width = 2;
-    int32 tile_height = 3;
-
-    float world_pixel_height = 4;
-    float world_pixel_width = 5;
-    int32 tile_size_pixels = 6;
-
-    string assigned_player_id = 7;
+  repeated MapRow rows = 1;
+  int32 tile_width = 2;
+  int32 tile_height = 3;
+  float world_pixel_height = 4;
+  float world_pixel_width = 5;
+  int32 tile_size_pixels = 6;
+  string assigned_player_id = 7;
 }
 
+// NEW: Represents changes to the game state
+message DeltaUpdate {
+  repeated Player updated_players = 1;    // Players added or whose state changed
+  repeated string removed_player_ids = 2; // IDs of players who left
+  // Optional: uint64 sequence_number = 3; // For handling out-of-order/missed packets
+}
+
+
+// Message sent from Server to Client
 message ServerMessage {
-    oneof message {
-        InitialMapData initial_map_data = 1;
-        GameState game_state = 2;
-    }
+  oneof message {
+    InitialMapData initial_map_data = 1;
+    // GameState game_state = 2; // REMOVED
+    DeltaUpdate delta_update = 3; // ADDED
+  }
 }
+
+// Animation states for the player character
+enum AnimationState {
+  UNKNOWN_STATE = 0;
+  IDLE = 1;
+  RUNNING_UP = 2;
+  RUNNING_DOWN = 3;
+  RUNNING_LEFT = 4;
+  RUNNING_RIGHT = 5;
+}
+
 
 // The gRPC service definition - Using Bidirectional Stream
 service GameService {
   // A bidirectional stream for real-time game updates and input
-  // Client sends PlayerInput, Server streams ServerMessage.
-  // First message from Client *could* be special (e.g., name request)
-  // First message from Server *could* be special (e.g., assigned ID, initial state)
   rpc GameStream (stream PlayerInput) returns (stream ServerMessage);
 }

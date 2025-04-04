@@ -177,7 +177,8 @@ class NetworkHandler:
                     outgoing_msg = retrieved_item
                     print(f"NetHandler GEN: Found ClientMessage in outgoing queue!")
                 else:
-                    print(f"NetHandler GEN: Error - Unexpected item type in outgoing queue: {type(retrieved_item)}")
+                    print(
+                        f"NetHandler GEN: Error - Unexpected item type in outgoing queue: {type(retrieved_item)}")
                     raise QueueEmpty
             except QueueEmpty:
                 with self.direction_lock:
@@ -185,7 +186,8 @@ class NetworkHandler:
                 input_msg = game_pb2.PlayerInput(direction=dir_to_send)
                 outgoing_msg = game_pb2.ClientMessage(player_input=input_msg)
             except Exception as e:
-                print(f"NetHandler GEN OutQueue Err: Type={type(e).__name__}, Msg='{e}'")
+                print(
+                    f"NetHandler GEN OutQueue Err: Type={type(e).__name__}, Msg='{e}'")
                 with self.direction_lock:
                     dir_to_send = self.input_direction
                 input_msg = game_pb2.PlayerInput(direction=dir_to_send)
@@ -194,7 +196,8 @@ class NetworkHandler:
                 msg_type = outgoing_msg.WhichOneof('payload')
                 yield outgoing_msg
             else:
-                print("NetHandler GEN: Warning - No message prepared to yield this iteration.")
+                print(
+                    "NetHandler GEN: Warning - No message prepared to yield this iteration.")
             time.sleep(1.0 / 30.0)
 
     def _listen_for_updates(self):

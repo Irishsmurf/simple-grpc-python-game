@@ -1,4 +1,4 @@
-// Package game manages the core game state.
+// Package game manages the core game state for the gRPC server.
 package game
 
 import (
@@ -11,410 +11,243 @@ import (
 	"sync"
 	"time"
 
-	// Assuming your module path allows this import based on previous steps
-	pb "simple-grpc-game/gen/go/game" // Adjust if your module path is different!
+	// Adjust the import path based on your Go module setup
+	pb "simple-grpc-game/gen/go/game"
 )
 
-var (
-	WorldMinX float32 = 0.0
-	WorldMaxX float32 = 5000.0
-	WorldMinY float32 = 0.0
-	WorldMaxY float32 = 5000.0
-)
+// --- Constants ---
 
 const (
-	PlayerHalfWidth  float32 = 64.0
-	PlayerHalfHeight float32 = 64.0
+	// Player dimensions and speed
+	PlayerHalfWidth  float32 = 64.0 // Half the player's width for collision calculations
+	PlayerHalfHeight float32 = 64.0 // Half the player's height for collision calculations
+	PlayerMoveSpeed  float32 = 16.0 // Pixels per update cycle when moving
 
-	TileSize      int = 32
-	MapTileWidth  int = 25
-	MapTileHeight int = 20
+	// Map and Tile configuration
+	DefaultTileSize int    = 32        // Default size of each tile in pixels (can be overridden by map data)
+	MapFilePath     string = "map.txt" // Path to the map file relative to server execution
+
+	// Timeouts
+	// movementTimeout = 200 * time.Millisecond // How long input direction persists without new input
 )
 
-type TileType int
+// TileType represents the type of a map tile (e.g., walkable, wall).
+type TileType int32 // Use int32 to match protobuf repeated field type
 
 const (
-	TileTypeEmpty TileType = iota
-	TileTypeWall
+	TileTypeEmpty TileType = 0 // Represents a walkable tile
+	TileTypeWall  TileType = 1 // Represents a solid wall tile
 )
+
+// String provides a human-readable representation of a TileType.
+func (t TileType) String() string {
+	switch t {
+	case TileTypeEmpty:
+		return "Empty"
+	case TileTypeWall:
+		return "Wall"
+	default:
+		return fmt.Sprintf("Unknown(%d)", t)
+	}
+}
+
+// trackedPlayer holds the game state data for a player along with
+// server-side tracking information like last input time.
+type trackedPlayer struct {
+	PlayerData    *pb.Player               // Protobuf representation sent to clients
+	LastInputTime time.Time                // Timestamp of the last received input
+	LastDirection pb.PlayerInput_Direction // Last movement direction received
+}
 
 // State manages the shared game state in a thread-safe manner.
 type State struct {
-	mu      sync.RWMutex // Read-write mutex for finer-grained locking (optional, Mutex is fine too)
-	players map[string]*trackedPlayer
+	mu sync.RWMutex // Read-write mutex for protecting concurrent access
 
-	worldMap      [][]TileType
-	mapTileWidth  int
-	mapTileHeight int
+	players map[string]*trackedPlayer // Map from playerID to their tracked state
+
+	// World map data
+	worldMap      [][]TileType // 2D slice representing the tile grid
+	mapTileWidth  int          // Width of the map in tiles
+	mapTileHeight int          // Height of the map in tiles
+	tileSize      int          // Size of one tile in pixels (read from map data or default)
+
+	// Calculated world boundaries in pixels
+	worldMinX float32
+	worldMaxX float32
+	worldMinY float32
+	worldMaxY float32
 }
 
-type trackedPlayer struct {
-	PlayerData    *pb.Player
-	LastInputTime time.Time
-	LastDirection pb.PlayerInput_Direction
-}
-
+// loadMapFromFile reads a map definition from a text file.
+// Expected format: space-separated integers per line, each representing a TileType.
+// Returns the map grid, width (tiles), height (tiles), and any error encountered.
 func loadMapFromFile(filePath string) ([][]TileType, int, int, error) {
-
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("failed to open map file: %s - %w", filePath, err)
+		return nil, 0, 0, fmt.Errorf("failed to open map file '%s': %w", filePath, err)
 	}
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
 	var tileMap [][]TileType
-	width := -1
+	width := -1 // Initialize width as unknown
 
-	rowCount := 0
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
-			continue
+			continue // Skip empty lines
 		}
+
 		parts := strings.Fields(line)
-		currentPartsCount := len(parts)
+		currentWidth := len(parts)
 
 		if width == -1 {
-			width = currentPartsCount
-		} else if currentPartsCount != width {
-			return nil, 0, 0, fmt.Errorf("inconsistent row length in map file")
+			// First non-empty line determines the map width
+			width = currentWidth
+		} else if currentWidth != width {
+			// Ensure all rows have the same length
+			return nil, 0, 0, fmt.Errorf("inconsistent row length in map file (expected %d, got %d)", width, currentWidth)
+		}
+
+		if width == 0 {
+			return nil, 0, 0, fmt.Errorf("map row has zero width")
 		}
 
 		row := make([]TileType, width)
 		for i, part := range parts {
 			tileInt, err := strconv.Atoi(part)
 			if err != nil {
-				log.Printf("Invalid TileID")
-				return nil, 0, 0, fmt.Errorf("invalid tile ID in map file: %s - %w", part, err)
+				return nil, 0, 0, fmt.Errorf("invalid non-integer tile ID '%s' in map file: %w", part, err)
 			}
+
 			tileID := TileType(tileInt)
-			if tileID < TileTypeEmpty || tileID > TileTypeWall {
-				log.Printf("Invalid tile ID %d in map file, setting to Empty", tileID)
-				tileID = TileTypeEmpty
+			// Basic validation for known tile types (can be expanded)
+			if tileID != TileTypeEmpty && tileID != TileTypeWall {
+				log.Printf("Warning: Invalid tile ID %d found in map file at row %d, col %d. Treating as Empty.", tileID, len(tileMap), i)
+				tileID = TileTypeEmpty // Default to empty/walkable for unknown types
 			}
-			if i < len(row) {
-				row[i] = tileID
-			} else {
-				log.Printf("ERROR: Index %d out of bounds for row slice with len %d (width %d)", i, len(row), width)
-			}
+			row[i] = tileID
 		}
 		tileMap = append(tileMap, row)
-		rowCount++
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, 0, 0, fmt.Errorf("error reading map file: %s - %w", filePath, err)
+		return nil, 0, 0, fmt.Errorf("error reading map file '%s': %w", filePath, err)
 	}
 
-	if len(tileMap) == 0 || width == -1 {
-		return nil, 0, 0, fmt.Errorf("map file is empty or invalid")
+	if len(tileMap) == 0 || width <= 0 {
+		return nil, 0, 0, fmt.Errorf("map file '%s' is empty or invalid", filePath)
 	}
 
 	height := len(tileMap)
-	log.Printf("Loaded map from file: %s, dimensions: %dx%d", filePath, width, height)
+	log.Printf("Loaded map from '%s', dimensions: %d x %d tiles.", filePath, width, height)
 	return tileMap, width, height, nil
 }
 
 // NewState creates and initializes a new game state manager.
-func NewState() *State {
-
-	mapFilePath := "map.txt"
-	loadedMap, width, height, err := loadMapFromFile(mapFilePath)
+// It loads the map from the file specified by the MapFilePath constant.
+// Returns the initialized State or an error if map loading fails.
+func NewState() (*State, error) {
+	loadedMap, width, height, err := loadMapFromFile(MapFilePath)
 	if err != nil {
-		log.Fatalf("Error loading map from file: %s - using default map", err)
+		// Return error instead of Fatalf
+		return nil, fmt.Errorf("error loading map: %w", err)
 	}
-	if width == 0 || height == 0 {
-		log.Fatalf("Invalid map dimensions: %dx%d - using default map", width, height)
-	}
+
+	// Calculate world boundaries based on loaded map and tile size
+	tileSize := DefaultTileSize // Use default for now, could be overridden if map format supports it
+	worldPixelWidth := float32(width * tileSize)
+	worldPixelHeight := float32(height * tileSize)
 
 	newState := &State{
 		players:       make(map[string]*trackedPlayer),
 		worldMap:      loadedMap,
-		mapTileHeight: height,
 		mapTileWidth:  width,
+		mapTileHeight: height,
+		tileSize:      tileSize,
+		// Set world boundaries (assuming origin 0,0)
+		worldMinX: 0.0,
+		worldMaxX: worldPixelWidth,
+		worldMinY: 0.0,
+		worldMaxY: worldPixelHeight,
 	}
 
-	// Logging
-	actualHeight := len(newState.worldMap)
-	actualWidth := 0
+	log.Printf("Game state initialized. World boundaries: X(%.1f, %.1f), Y(%.1f, %.1f)",
+		newState.worldMinX, newState.worldMaxX, newState.worldMinY, newState.worldMaxY)
 
-	if actualHeight > 0 {
-		// Check the length of the first row to get the actual width
-		actualWidth = len(newState.worldMap[0])
-	}
-
-	log.Printf("Map Loaded. Stored Dims: %d x %d. Actual Slice Dims: %d x %d.",
-		newState.mapTileWidth, newState.mapTileHeight,
-		actualWidth, actualHeight) // Note: Width/Height order convention
-
-	if newState.mapTileHeight != actualHeight || newState.mapTileWidth != actualWidth {
-		log.Printf("!!!! WARNING: Stored map dimensions do NOT match actual slice dimensions !!!!")
-		newState.mapTileWidth = actualWidth
-		newState.mapTileHeight = actualHeight
-	}
-
-	WorldMaxX = float32(newState.mapTileWidth * TileSize)
-	WorldMaxY = float32(newState.mapTileHeight * TileSize)
-	log.Printf("World boundaries set to: X(%f, %f), Y(%f, %f)", WorldMinX, WorldMaxX, WorldMinY, WorldMaxY)
-
-	return newState
+	return newState, nil
 }
 
-func (s *State) CheckPlayerCollision(playerID string, potentialX, potentialY float32) bool {
-	moveLeft := potentialX - PlayerHalfWidth
-	moveRight := potentialX + PlayerHalfWidth
-	moveTop := potentialY - PlayerHalfHeight
-	moveBottom := potentialY + PlayerHalfHeight
+// --- Player Management ---
 
-	for id, trackedPlayer := range s.players {
-		if id == playerID {
-			continue // Skip self
-		}
-
-		otherX := trackedPlayer.PlayerData.XPos
-		otherY := trackedPlayer.PlayerData.YPos
-		otherLeft := otherX - PlayerHalfWidth
-		otherRight := otherX + PlayerHalfWidth
-		otherTop := otherY - PlayerHalfHeight
-		otherBottom := otherY + PlayerHalfHeight
-
-		xOverlap := (moveLeft < otherRight) && (moveRight > otherLeft)
-		yOverlap := (moveTop < otherBottom) && (moveBottom > otherTop)
-
-		if xOverlap && yOverlap {
-			return true // Collision detected
-		}
-	}
-	return false // No collision
-}
-
-func (s *State) CheckMapCollision(pixelX, pixelY float32) bool {
-
-	minX := pixelX - PlayerHalfWidth
-	maxX := pixelX + PlayerHalfWidth
-	minY := pixelY - PlayerHalfHeight
-	maxY := pixelY + PlayerHalfHeight
-
-	log.Printf("DEBUG CheckMapCollision: Pixel Bounds (MinX:%.1f, MaxX:%.1f, MinY:%.1f, MaxY:%.1f)", minX, maxX, minY, maxY)
-
-	epsilon := float32(0.0001)
-	startTileX := int(minX / float32(TileSize))
-	endTileX := int((maxX - epsilon) / float32(TileSize))
-	startTileY := int(minY / float32(TileSize))
-	endTileY := int((maxY - epsilon) / float32(TileSize))
-
-	log.Printf("DEBUG CheckMapCollision: Tile Range Check (X: %d to %d, Y: %d to %d)", startTileX, endTileX, startTileY, endTileY)
-
-	for ty := startTileY; ty <= endTileY; ty++ {
-		for tx := startTileX; tx <= endTileX; tx++ {
-			log.Printf("DEBUG CheckMapCollision: Checking tile (%d, %d)", tx, ty)
-
-			if tx < 0 || tx >= s.mapTileWidth || ty < 0 || ty >= s.mapTileHeight {
-				log.Printf("DEBUG CheckMapCollision: Collision! Tile (%d, %d) is outside map bounds (%dx%d)", tx, ty, s.mapTileWidth, s.mapTileHeight)
-
-				return true
-			}
-
-			tileType := s.worldMap[ty][tx]
-			if tileType == TileTypeWall { // Assuming 1 is a wall
-				log.Printf("DEBUG CheckMapCollision: Collision! Tile (%d, %d) is a Wall (%v)", tx, ty, tileType)
-
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// GetAllPlayerIDs returns a slice of current player IDs. Thread-safe.
-func (s *State) GetAllPlayerIDs() []string {
-	s.mu.RLock() // Read lock is sufficient
-	defer s.mu.RUnlock()
-	ids := make([]string, 0, len(s.players))
-	for id := range s.players {
-		ids = append(ids, id)
-	}
-	return ids
-}
-
-func (s *State) GetTrackedPlayer(playerID string) (*trackedPlayer, bool) {
-	s.mu.RLock() // Read lock
-	defer s.mu.RUnlock()
-	// Return pointer directly for efficiency in gameTick's checks.
-	// Relies on gameTick not modifying the fields improperly.
-	tp, exists := s.players[playerID]
-	return tp, exists
-}
-
-func (s *State) UpdatePlayerDirection(playerID string, dir pb.PlayerInput_Direction) bool {
-	s.mu.Lock() // Write lock needed
-	defer s.mu.Unlock()
-	tp, exists := s.players[playerID]
-	if !exists {
-		return false // Player might have disconnected
-	}
-	// Only update if the direction actually changes
-	if tp.LastDirection != dir {
-		tp.LastDirection = dir
-		return true // Indicate that an update happened
-	}
-	return false // No change needed
-}
-
-// AddPlayer adds a new player to the game state.
-// It returns the added player object.
+// AddPlayer adds a new player to the game state with a given ID and starting position.
+// Returns the created Player object. Thread-safe.
 func (s *State) AddPlayer(playerID string, startX, startY float32) *pb.Player {
-	s.mu.Lock() // Use exclusive lock for writing
+	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Clamp starting position to world boundaries just in case
+	startX = clamp(startX, s.worldMinX+PlayerHalfWidth, s.worldMaxX-PlayerHalfWidth)
+	startY = clamp(startY, s.worldMinY+PlayerHalfHeight, s.worldMaxY-PlayerHalfHeight)
 
 	playerData := &pb.Player{
-		Id:   playerID,
-		XPos: startX,
-		YPos: startY,
+		Id:                    playerID,
+		XPos:                  startX,
+		YPos:                  startY,
+		CurrentAnimationState: pb.AnimationState_IDLE, // Start idle
 	}
 
 	tracked := &trackedPlayer{
 		PlayerData:    playerData,
-		LastInputTime: time.Now(),
+		LastInputTime: time.Now(), // Initialize last input time
 		LastDirection: pb.PlayerInput_UNKNOWN,
 	}
 
 	s.players[playerID] = tracked
+	log.Printf("Player %s added at (%.1f, %.1f)", playerID, startX, startY)
 	return playerData
 }
 
-// RemovePlayer removes a player from the game state by ID.
+// RemovePlayer removes a player from the game state by ID. Thread-safe.
 func (s *State) RemovePlayer(playerID string) {
-	s.mu.Lock() // Use exclusive lock for writing
+	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.players, playerID)
+	if _, exists := s.players[playerID]; exists {
+		delete(s.players, playerID)
+		log.Printf("Player %s removed", playerID)
+	} else {
+		log.Printf("Attempted to remove non-existent player %s", playerID)
+	}
 }
 
-// UpdatePlayerPosition updates the position of an existing player.
-// Returns true if the player was found and updated, false otherwise.
-func (s *State) UpdatePlayerPosition(playerID string, newX, newY float32) bool {
-	s.mu.Lock() // Use exclusive lock for writing
-	defer s.mu.Unlock()
-
-	player, exists := s.players[playerID]
-	if !exists {
-		return false
-	}
-	player.PlayerData.XPos = newX
-	player.PlayerData.YPos = newY
-	return true
-}
-
-// ApplyInput updates a player's position based on an input direction.
-// Returns the updated player and true if successful, nil and false otherwise.
-func (s *State) ApplyInput(playerID string, direction pb.PlayerInput_Direction) (*pb.Player, bool) {
-	s.mu.Lock() // Use exclusive lock for writing
-	defer s.mu.Unlock()
-
-	player, exists := s.players[playerID]
-	if !exists {
-		return nil, false
-	}
-
-	player.LastInputTime = time.Now() // Update the last input time
-	player.LastDirection = direction  // Update the last direction
-
-	currentX := player.PlayerData.XPos
-	currentY := player.PlayerData.YPos
-	potentialX := currentX
-	potentialY := currentY
-	isMoving := false
-	moveAttemptBlocked := false
-
-	if direction != pb.PlayerInput_UNKNOWN {
-		isMoving = true
-		moveSpeed := float32(10) // Example speed - could be configurable
-		switch direction {
-		case pb.PlayerInput_UP:
-			potentialY -= moveSpeed
-		case pb.PlayerInput_DOWN:
-			potentialY += moveSpeed
-		case pb.PlayerInput_LEFT:
-			potentialX -= moveSpeed
-		case pb.PlayerInput_RIGHT:
-			potentialX += moveSpeed
-		}
-
-		if potentialX-PlayerHalfWidth < WorldMinX {
-			potentialX = WorldMinX
-		} else if potentialX+PlayerHalfWidth > WorldMaxX {
-			potentialX = WorldMaxX
-		}
-
-		if potentialY-PlayerHalfHeight < WorldMinY {
-			potentialY = WorldMinY
-		} else if potentialY+PlayerHalfHeight > WorldMaxY {
-			potentialY = WorldMaxY
-		}
-
-		collidesWithMap := s.CheckMapCollision(potentialX, potentialY)
-		if collidesWithMap {
-			moveAttemptBlocked = true
-		}
-
-		if !moveAttemptBlocked {
-			collidesWithPlayer := s.CheckPlayerCollision(playerID, potentialX, potentialY)
-			if collidesWithPlayer {
-				log.Printf("Collision detected with player %s at (%f, %f)", playerID, potentialX, potentialY)
-				moveAttemptBlocked = true
-			}
-		}
-
-		if isMoving && !moveAttemptBlocked {
-			player.PlayerData.XPos = potentialX
-			player.PlayerData.YPos = potentialY
-		}
-	}
-
-	// Return a copy to potentially avoid data races if used outside lock, though less critical here
-	playerCopy := &pb.Player{
-		Id:   player.PlayerData.Id,
-		XPos: player.PlayerData.XPos,
-		YPos: player.PlayerData.YPos,
-	}
-
-	return playerCopy, true
-}
-
-// GetPlayer retrieves a player's data by ID.
-// Returns the player object and true if found, nil and false otherwise.
-// Uses a read lock, allowing concurrent reads.
+// GetPlayer retrieves a copy of a player's data by ID.
+// Returns the player object and true if found, nil and false otherwise. Thread-safe (read lock).
 func (s *State) GetPlayer(playerID string) (*pb.Player, bool) {
-	s.mu.RLock() // Use read lock for reading
+	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	trackedPlayer, exists := s.players[playerID]
 	if !exists {
 		return nil, false
 	}
-	// Return a copy to prevent modification of the internal map data via the pointer
-	playerCopy := &pb.Player{
-		Id:   trackedPlayer.PlayerData.Id,
-		XPos: trackedPlayer.PlayerData.XPos,
-		YPos: trackedPlayer.PlayerData.YPos,
-	}
-	return playerCopy, true
+	// Return a copy to prevent external modification of internal state
+	playerCopy := *trackedPlayer.PlayerData // Shallow copy is okay for protobuf message
+	return &playerCopy, true
 }
 
-// GetAllPlayers returns a slice containing copies of all current players.
-// Uses a read lock, allowing concurrent reads.
+// GetAllPlayers returns a slice containing copies of all current players' data. Thread-safe (read lock).
 func (s *State) GetAllPlayers() []*pb.Player {
-	s.mu.RLock() // Use read lock for reading
+	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	playerList := make([]*pb.Player, 0, len(s.players))
-	for _, p := range s.players {
-
+	for _, trackedP := range s.players {
+		// Determine animation state based on last known direction
+		// This logic could potentially be moved to the client if preferred,
+		// but doing it here ensures consistency in the broadcasted state.
 		currentAnimationState := pb.AnimationState_IDLE
-
-		switch p.LastDirection {
+		switch trackedP.LastDirection {
 		case pb.PlayerInput_UP:
 			currentAnimationState = pb.AnimationState_RUNNING_UP
 		case pb.PlayerInput_DOWN:
@@ -423,47 +256,252 @@ func (s *State) GetAllPlayers() []*pb.Player {
 			currentAnimationState = pb.AnimationState_RUNNING_LEFT
 		case pb.PlayerInput_RIGHT:
 			currentAnimationState = pb.AnimationState_RUNNING_RIGHT
-		default:
-			currentAnimationState = pb.AnimationState_IDLE
+			// default is IDLE
 		}
 
-		// Create copies to prevent external modification of internal state
-		playerCopy := &pb.Player{
-			Id:                    p.PlayerData.Id,
-			XPos:                  p.PlayerData.XPos,
-			YPos:                  p.PlayerData.YPos,
-			CurrentAnimationState: currentAnimationState,
-		}
-		playerList = append(playerList, playerCopy)
+		// Create copies to prevent data races if the caller modifies the slice contents
+		playerCopy := *trackedP.PlayerData                       // Create a copy of the player data
+		playerCopy.CurrentAnimationState = currentAnimationState // Update animation state in the copy
+		playerList = append(playerList, &playerCopy)
 	}
 	return playerList
 }
 
-func (s *State) GetMapData() ([][]TileType, int, int) {
+// GetAllPlayerIDs returns a slice of all current player IDs. Thread-safe (read lock).
+func (s *State) GetAllPlayerIDs() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	// Return a copy? Or assume caller won't modify? For now, return direct reference.
-	// Be careful if map could change later!
-	return s.worldMap, s.mapTileWidth, s.mapTileHeight
+	ids := make([]string, 0, len(s.players))
+	for id := range s.players {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
-func (s *State) GetMapDataAndDimensions() ([][]TileType, int, int, error) {
+// GetTrackedPlayer returns the internal trackedPlayer struct for server-side logic (like timeouts).
+// Use with caution - modifying the returned pointer requires holding the State mutex.
+// Returns the tracked player and true if found, nil and false otherwise. Thread-safe (read lock).
+func (s *State) GetTrackedPlayer(playerID string) (*trackedPlayer, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	tp, exists := s.players[playerID]
+	// Note: Returning pointer directly. Caller must handle locking if modifying.
+	return tp, exists
+}
+
+// UpdatePlayerDirection updates only the LastDirection field for a player.
+// Used by the server tick to reset direction on timeout. Thread-safe.
+// Returns true if the direction was changed, false otherwise (or if player not found).
+func (s *State) UpdatePlayerDirection(playerID string, dir pb.PlayerInput_Direction) bool {
+	s.mu.Lock() // Write lock needed to modify trackedPlayer
+	defer s.mu.Unlock()
+	tp, exists := s.players[playerID]
+	if !exists {
+		return false // Player might have disconnected
+	}
+	// Only update if the direction actually changes
+	changed := false
+	if tp.LastDirection != dir {
+		tp.LastDirection = dir
+		changed = true
+	}
+	return changed
+}
+
+// --- Input & Movement ---
+
+// ApplyInput updates a player's state based on an input direction.
+// It handles movement, collision detection, and boundary checks.
+// Returns the updated Player object and true if successful, nil and false if player not found. Thread-safe.
+func (s *State) ApplyInput(playerID string, direction pb.PlayerInput_Direction) (*pb.Player, bool) {
+	s.mu.Lock() // Exclusive lock needed for updating player state
+	defer s.mu.Unlock()
+
+	trackedP, exists := s.players[playerID]
+	if !exists {
+		log.Printf("ApplyInput: Player %s not found.", playerID)
+		return nil, false
+	}
+
+	// Update tracking info regardless of movement success
+	trackedP.LastInputTime = time.Now()
+	trackedP.LastDirection = direction
+
+	// Calculate potential new position
+	currentX := trackedP.PlayerData.XPos
+	currentY := trackedP.PlayerData.YPos
+	potentialX := currentX
+	potentialY := currentY
+	moved := false
+
+	if direction != pb.PlayerInput_UNKNOWN {
+		switch direction {
+		case pb.PlayerInput_UP:
+			potentialY -= PlayerMoveSpeed
+		case pb.PlayerInput_DOWN:
+			potentialY += PlayerMoveSpeed
+		case pb.PlayerInput_LEFT:
+			potentialX -= PlayerMoveSpeed
+		case pb.PlayerInput_RIGHT:
+			potentialX += PlayerMoveSpeed
+		}
+
+		// Clamp potential position to world boundaries first
+		potentialX = clamp(potentialX, s.worldMinX+PlayerHalfWidth, s.worldMaxX-PlayerHalfWidth)
+		potentialY = clamp(potentialY, s.worldMinY+PlayerHalfHeight, s.worldMaxY-PlayerHalfHeight)
+
+		// Check for collisions *before* updating the actual position
+		canMove := true
+		if s.checkMapCollision(potentialX, potentialY) {
+			// log.Printf("ApplyInput: Map collision detected for %s at (%.1f, %.1f)", playerID, potentialX, potentialY)
+			canMove = false
+		} else if s.checkPlayerCollision(playerID, potentialX, potentialY) {
+			// log.Printf("ApplyInput: Player collision detected for %s at (%.1f, %.1f)", playerID, potentialX, potentialY)
+			canMove = false
+		}
+
+		// Update position only if the move is valid
+		if canMove {
+			trackedP.PlayerData.XPos = potentialX
+			trackedP.PlayerData.YPos = potentialY
+			moved = true
+		}
+		// If move was attempted but blocked, we don't update X/Y but keep LastDirection
+	}
+
+	// Return a copy of the potentially updated player data
+	playerCopy := *trackedP.PlayerData // Create a copy
+	// Update animation state in the copy based on the *intended* direction (even if blocked)
+	// or set to IDLE if direction is UNKNOWN
+	if direction == pb.PlayerInput_UNKNOWN {
+		playerCopy.CurrentAnimationState = pb.AnimationState_IDLE
+	} else {
+		switch direction { // Use intended direction for animation state
+		case pb.PlayerInput_UP:
+			playerCopy.CurrentAnimationState = pb.AnimationState_RUNNING_UP
+		case pb.PlayerInput_DOWN:
+			playerCopy.CurrentAnimationState = pb.AnimationState_RUNNING_DOWN
+		case pb.PlayerInput_LEFT:
+			playerCopy.CurrentAnimationState = pb.AnimationState_RUNNING_LEFT
+		case pb.PlayerInput_RIGHT:
+			playerCopy.CurrentAnimationState = pb.AnimationState_RUNNING_RIGHT
+		default: // Should not happen if UNKNOWN is handled above
+			playerCopy.CurrentAnimationState = pb.AnimationState_IDLE
+		}
+	}
+
+	// If the player didn't move (either input was UNKNOWN or move was blocked),
+	// ensure the animation state reflects IDLE if they aren't actively trying to move.
+	if !moved && direction == pb.PlayerInput_UNKNOWN {
+		playerCopy.CurrentAnimationState = pb.AnimationState_IDLE
+	}
+
+	return &playerCopy, true
+}
+
+// --- Collision Detection ---
+
+// checkMapCollision checks if a given bounding box (defined by center and half-dimensions) collides with any wall tiles.
+// Assumes read lock is already held or not needed if map is static.
+// NOTE: This is called internally by ApplyInput which holds the write lock.
+func (s *State) checkMapCollision(centerX, centerY float32) bool {
+	// Calculate the bounding box edges
+	minX := centerX - PlayerHalfWidth
+	maxX := centerX + PlayerHalfWidth
+	minY := centerY - PlayerHalfHeight
+	maxY := centerY + PlayerHalfHeight
+
+	// Determine the range of map tiles the bounding box could overlap with
+	// Use a small epsilon to handle floating point inaccuracies near tile boundaries
+	epsilon := float32(0.001)
+	startTileX := int(minX / float32(s.tileSize))
+	endTileX := int((maxX - epsilon) / float32(s.tileSize))
+	startTileY := int(minY / float32(s.tileSize))
+	endTileY := int((maxY - epsilon) / float32(s.tileSize))
+
+	// Iterate through the potentially overlapping tiles
+	for ty := startTileY; ty <= endTileY; ty++ {
+		for tx := startTileX; tx <= endTileX; tx++ {
+			// Check if the tile coordinates are within the map bounds
+			if tx < 0 || tx >= s.mapTileWidth || ty < 0 || ty >= s.mapTileHeight {
+				// Considered a collision if trying to move outside the map
+				// log.Printf("DEBUG CheckMapCollision: Collision! Tile (%d, %d) is outside map bounds (%dx%d)", tx, ty, s.mapTileWidth, s.mapTileHeight)
+				return true
+			}
+
+			// Check the tile type at the current coordinates
+			if s.worldMap[ty][tx] == TileTypeWall {
+				// log.Printf("DEBUG CheckMapCollision: Collision! Tile (%d, %d) is a Wall (%v)", tx, ty, s.worldMap[ty][tx])
+				return true // Collision detected with a wall
+			}
+		}
+	}
+
+	return false // No collision detected with walls or map boundaries
+}
+
+// checkPlayerCollision checks if the bounding box of a player (potentialX/Y) collides with any *other* player.
+// Assumes the appropriate lock (read or write) is already held by the caller (ApplyInput holds write lock).
+func (s *State) checkPlayerCollision(playerID string, potentialX, potentialY float32) bool {
+	moveLeft := potentialX - PlayerHalfWidth
+	moveRight := potentialX + PlayerHalfWidth
+	moveTop := potentialY - PlayerHalfHeight
+	moveBottom := potentialY + PlayerHalfHeight
+
+	for otherID, otherTrackedPlayer := range s.players {
+		if otherID == playerID {
+			continue // Don't check collision with self
+		}
+
+		otherX := otherTrackedPlayer.PlayerData.XPos
+		otherY := otherTrackedPlayer.PlayerData.YPos
+		otherLeft := otherX - PlayerHalfWidth
+		otherRight := otherX + PlayerHalfWidth
+		otherTop := otherY - PlayerHalfHeight
+		otherBottom := otherY + PlayerHalfHeight
+
+		// Standard AABB collision check
+		xOverlap := (moveLeft < otherRight) && (moveRight > otherLeft)
+		yOverlap := (moveTop < otherBottom) && (moveBottom > otherTop)
+
+		if xOverlap && yOverlap {
+			return true // Collision detected
+		}
+	}
+	return false // No collision with other players
+}
+
+// --- Map Data Access ---
+
+// GetMapDataAndDimensions returns the map grid and its dimensions. Thread-safe (read lock).
+// Returns the map grid, width (tiles), height (tiles), tile size (pixels), and nil error on success.
+func (s *State) GetMapDataAndDimensions() ([][]TileType, int, int, int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.worldMap == nil || s.mapTileHeight == 0 || s.mapTileWidth == 0 {
-		return nil, 0, 0, fmt.Errorf("map data not loaded or invalid")
+		return nil, 0, 0, 0, fmt.Errorf("map data not loaded or invalid")
 	}
-	// Consider returning a deep copy if map could change, but okay for now
-	return s.worldMap, s.mapTileWidth, s.mapTileHeight, nil
+	// Return direct references - assumes map is static after loading.
+	// If map could change dynamically, a deep copy would be needed here.
+	return s.worldMap, s.mapTileWidth, s.mapTileHeight, s.tileSize, nil
 }
 
-func (t TileType) String() string {
-	switch t {
-	case TileTypeEmpty:
-		return "Empty"
-	case TileTypeWall:
-		return "Wall"
-	default:
-		return "Unknown"
+// GetWorldPixelDimensions returns the calculated width and height of the world in pixels.
+func (s *State) GetWorldPixelDimensions() (float32, float32) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.worldMaxX, s.worldMaxY // Max values represent dimensions from 0,0 origin
+}
+
+// --- Utility ---
+
+// clamp restricts a value to be within a minimum and maximum range.
+func clamp(value, min, max float32) float32 {
+	if value < min {
+		return min
 	}
+	if value > max {
+		return max
+	}
+	return value
 }

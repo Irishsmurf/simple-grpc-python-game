@@ -4,20 +4,8 @@ import time
 import sys
 import readchar
 
-# Import generated code (assuming 'gen/python' is accessible)
-# Adjust sys.path if your structure differs or use package installation
-import sys
-import os
-# Add the parent directory ('simple-grpc-game') to sys.path to find 'gen'
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-try:
-    from gen.python import game_pb2
-    from gen.python import game_pb2_grpc
-except ModuleNotFoundError as e:
-    print(e)
-    print("Error: Could not find generated Proto/gRPC Python code.")
-    print("Ensure 'protoc' was run correctly and 'gen/python' is in the Python path.")
-    sys.exit(1)
+from gen.python import game_pb2
+from gen.python import game_pb2_grpc # If needed in that file
 
 
 SERVER_ADDRESS = "localhost:50051" # Server address and port

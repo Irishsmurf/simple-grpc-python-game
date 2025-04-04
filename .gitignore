@@ -6,3 +6,4 @@ client/dist/
 client/client.spec
 gen/go/game/*
 gen/python/*
+!gen/python/__init__.py

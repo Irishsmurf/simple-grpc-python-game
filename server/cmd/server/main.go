@@ -248,9 +248,6 @@ func (s *gameServer) gameTick() {
 		log.Println("Game state changed during tick. Broadcasting updated state.")
 		s.broadcastState()
 	}
-
-	// Always broadcast state at tick rate for now
-	s.broadcastState()
 }
 
 func main() {

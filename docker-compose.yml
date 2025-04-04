@@ -1,0 +1,20 @@
+version: '3.8' # Specifies the Docker Compose file format version
+
+services:
+  # Define the Go server service
+  server:
+    # Instructions on how to build the image for this service
+    build:
+      context: . # Use the current directory (where this file is) as the build context
+      dockerfile: Dockerfile # Specify the name of the Dockerfile to use
+    container_name: simple-grpc-game-server
+    ports:
+      - "50051:50051"
+    restart: unless-stopped
+    # volumes:
+    #   - ./map.txt:/app/map.txt:ro # Mount local map file read-only
+
+networks:
+  # Optional: Define a default network if you plan to add more services later
+  default:
+    driver: bridge

@@ -79,7 +79,7 @@ message SendChatMessageRequest {
 }
 
 message ClientMessage {
-  oneof client_message {
+  oneof payload {
     PlayerInput player_input = 1; // Player input message
     ClientHello client_hello = 2; // Client hello message
     SendChatMessageRequest send_chat_message = 3;

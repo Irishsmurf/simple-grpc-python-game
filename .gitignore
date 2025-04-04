@@ -4,4 +4,5 @@ client/.venv_win/
 client/build/
 client/dist/
 client/client.spec
-gen/python/__pycache__/
+gen/go/game/*
+gen/python/*

@@ -53,6 +53,12 @@ message DeltaUpdate {
   // Optional: uint64 sequence_number = 3; // For handling out-of-order/missed packets
 }
 
+message ChatMessage {
+  string sender_username = 1;
+  string message_text = 2;
+  int64 timestamp = 3; // Timestamp of when the message was sent
+  string player_id = 4; // ID of the player who sent the message
+}
 
 // Message sent from Server to Client
 message ServerMessage {
@@ -60,6 +66,7 @@ message ServerMessage {
     InitialMapData initial_map_data = 1;
     // GameState game_state = 2; // REMOVED
     DeltaUpdate delta_update = 3; // ADDED
+    ChatMessage chat_message = 4;
   }
 }
 
@@ -67,10 +74,15 @@ message ClientHello {
   string desired_username = 1; // The username the client wants to use
 }
 
+message SendChatMessageRequest {
+  string message_text = 1;
+}
+
 message ClientMessage {
   oneof client_message {
     PlayerInput player_input = 1; // Player input message
     ClientHello client_hello = 2; // Client hello message
+    SendChatMessageRequest send_chat_message = 3;
   }
 }
 

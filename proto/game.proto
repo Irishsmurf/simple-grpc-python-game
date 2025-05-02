@@ -11,6 +11,7 @@ message Player {
   float y_pos = 3;
   AnimationState current_animation_state = 4;
   string username = 5;
+  float z_pos = 6;
 }
 
 // Represents the entire game state (used internally by client/server now, not sent directly)

@@ -7,7 +7,8 @@ option go_package = "simple-grpc-game/gen/go/game";
 // Represents a player in the game
 message Player {
   string id = 1; // Unique player identifier
-  float x_pos = 2;
+  float z_pos = 2;
+  float x_pos = 6;
   float y_pos = 3;
   AnimationState current_animation_state = 4;
   string username = 5;
